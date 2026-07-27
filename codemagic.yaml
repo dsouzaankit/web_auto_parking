@@ -16,7 +16,13 @@ workflows:
       - name: Generate Xcode project
         script: |
           brew install xcodegen
-          cd ios && xcodegen generate
+          cd ios
+          CFG="ParkMobileParking/Resources/BookingConfig.json"
+          EXAMPLE="ParkMobileParking/Resources/BookingConfig.example.json"
+          if [[ ! -f "$CFG" ]]; then
+            cp "$EXAMPLE" "$CFG"
+          fi
+          xcodegen generate
       - name: Build ipa
         script: |
           xcode-project build-ipa \

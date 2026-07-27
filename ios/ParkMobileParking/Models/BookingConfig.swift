@@ -1,6 +1,6 @@
 import Foundation
 
-/// Shared booking preferences. Edit `Resources/BookingConfig.json` manually.
+/// Shared booking preferences. Copy `BookingConfig.example.json` → `BookingConfig.json` and edit locally (gitignored).
 struct BookingConfig: Codable, Equatable {
     var email: String
     var phone: String

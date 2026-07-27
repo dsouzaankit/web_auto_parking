@@ -1,0 +1,14 @@
+{
+  "email": "you@example.com",
+  "phone": "2015550100",
+  "address": "123 Main St, Jersey City, NJ",
+  "preferGuestCheckout": true,
+  "paymentMethod": "applePay",
+  "sessionDurationHours": 4,
+  "vehicle": {
+    "makeAndModel": "Toyota Camry",
+    "licensePlateNumber": "ABC1234",
+    "country": "US",
+    "state": "NJ"
+  }
+}

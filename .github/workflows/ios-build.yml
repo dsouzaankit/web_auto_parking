@@ -32,6 +32,12 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Use BookingConfig template for CI
+        working-directory: ios
+        run: |
+          cp ParkMobileParking/Resources/BookingConfig.example.json \
+             ParkMobileParking/Resources/BookingConfig.json
+
       - name: Generate project
         working-directory: ios
         run: xcodegen generate
@@ -58,6 +64,12 @@ jobs:
 
       - name: Install XcodeGen
         run: brew install xcodegen
+
+      - name: Use BookingConfig template for CI
+        working-directory: ios
+        run: |
+          cp ParkMobileParking/Resources/BookingConfig.example.json \
+             ParkMobileParking/Resources/BookingConfig.json
 
       - name: Generate project
         working-directory: ios

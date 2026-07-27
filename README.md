@@ -4,26 +4,14 @@ SwiftUI wrapper that opens provider checkout in a `WKWebView`, starting at the *
 
 ## Prefill contact (edit by hand)
 
-Edit [`ios/ParkMobileParking/Resources/BookingConfig.json`](ios/ParkMobileParking/Resources/BookingConfig.json):
+`BookingConfig.json` is **gitignored** (personal data). Copy the template once, then edit locally:
 
-```json
-{
-  "email": "you@example.com",
-  "phone": "2015550100",
-  "address": "123 Main St, Jersey City, NJ",
-  "preferGuestCheckout": true,
-  "paymentMethod": "applePay",
-  "sessionDurationHours": 4,
-  "vehicle": {
-    "makeAndModel": "Toyota Camry",
-    "licensePlateNumber": "ABC1234",
-    "country": "US",
-    "state": "NJ"
-  }
-}
+```bash
+cp ios/ParkMobileParking/Resources/BookingConfig.example.json \
+   ios/ParkMobileParking/Resources/BookingConfig.json
 ```
 
-Rebuild after changes. Empty / `...` values are skipped. The WebView:
+Template: [`BookingConfig.example.json`](ios/ParkMobileParking/Resources/BookingConfig.example.json). Rebuild after changes. Empty / `...` values are skipped. The WebView:
 
 - Prefills **contact** (email / phone / address) and **vehicle** (make & model, plate, country, state — including `<select>` matches)
 - Prefers **guest checkout** (clicks Continue as Guest when shown; does not drive Log In)

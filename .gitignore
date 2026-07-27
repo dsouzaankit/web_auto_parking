@@ -1,7 +1,11 @@
 ios/ParkMobileParking.xcodeproj/
 ios/build/
+ios/build artifacts/
 ios/*.ipa
 ios/Payload/
 .DS_Store
 *.xcuserstate
 DerivedData/
+
+# Personal booking prefill — copy from BookingConfig.example.json
+ios/ParkMobileParking/Resources/BookingConfig.json
