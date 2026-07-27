@@ -135,8 +135,8 @@ struct WebViewRepresentable: UIViewRepresentable {
             windowFeatures: WKWindowFeatures
         ) -> WKWebView? {
             // Open target=_blank links in the same web view.
-            if navigationAction.targetFrame == nil, let request = navigationAction.request.url.map(URLRequest.init) {
-                webView.load(request)
+            if navigationAction.targetFrame == nil, let url = navigationAction.request.url {
+                webView.load(URLRequest(url: url))
             }
             return nil
         }
