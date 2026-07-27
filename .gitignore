@@ -1,0 +1,7 @@
+ios/ParkMobileParking.xcodeproj/
+ios/build/
+ios/*.ipa
+ios/Payload/
+.DS_Store
+*.xcuserstate
+DerivedData/
