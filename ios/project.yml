@@ -19,7 +19,8 @@ targets:
         buildPhase: resources
       - path: ParkMobileParking/Resources/BookingConfig.json
         buildPhase: resources
-        type: file    settings:
+        type: file
+    settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: Parking
