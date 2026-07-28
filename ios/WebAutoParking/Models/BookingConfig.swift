@@ -31,8 +31,9 @@ struct BookingConfig: Codable, Equatable {
 
         var normalizedMakeAndModel: String { BookingConfig.clean(makeAndModel) }
         var normalizedLicensePlate: String { BookingConfig.clean(licensePlateNumber) }
-        var normalizedCountry: String { BookingConfig.clean(country) }
-        var normalizedState: String { BookingConfig.clean(state) }
+        /// ParkMobile/SpotHero selects use ISO-ish codes (US, NJ). Accept full names too.
+        var normalizedCountry: String { BookingConfig.normalizeCountry(country) }
+        var normalizedState: String { BookingConfig.normalizeState(state) }
 
         var hasAnyValue: Bool {
             !normalizedMakeAndModel.isEmpty
@@ -137,5 +138,35 @@ struct BookingConfig: Codable, Equatable {
             return ""
         }
         return trimmed
+    }
+
+    static func normalizeCountry(_ raw: String) -> String {
+        let cleaned = clean(raw)
+        if cleaned.isEmpty { return "" }
+        let key = cleaned.lowercased().filter { $0.isLetter || $0.isNumber }
+        switch key {
+        case "us", "usa", "unitedstates", "unitedstatesofamerica", "america":
+            return "US"
+        case "ca", "can", "canada":
+            return "CA"
+        case "mx", "mex", "mexico":
+            return "MX"
+        default:
+            return cleaned.count == 2 ? cleaned.uppercased() : cleaned
+        }
+    }
+
+    static func normalizeState(_ raw: String) -> String {
+        let cleaned = clean(raw)
+        if cleaned.isEmpty { return "" }
+        if cleaned.count == 2 { return cleaned.uppercased() }
+        let key = cleaned.lowercased().filter { $0.isLetter || $0.isNumber }
+        let map: [String: String] = [
+            "newjersey": "NJ", "newyork": "NY", "pennsylvania": "PA", "california": "CA",
+            "texas": "TX", "florida": "FL", "massachusetts": "MA", "connecticut": "CT",
+            "delaware": "DE", "maryland": "MD", "virginia": "VA", "ohio": "OH",
+            "illinois": "IL", "georgia": "GA", "northcarolina": "NC", "southcarolina": "SC"
+        ]
+        return map[key] ?? cleaned
     }
 }

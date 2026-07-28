@@ -132,6 +132,7 @@ enum BookingFormPrefill {
           function setNativeValue(el, value) {
             if (!el || value == null || value === '') return false;
             if (el.disabled || el.readOnly) return false;
+            try { el.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
             var tag = (el.tagName || '').toUpperCase();
             if (tag === 'SELECT') return setSelectValue(el, value);
             try {
@@ -149,15 +150,31 @@ enum BookingFormPrefill {
           }
           function setSelectValue(el, value) {
             var want = norm(value);
+            var aliases = [want];
+            // Full names ↔ ISO codes used by ParkMobile selects.
+            if (want === 'unitedstates' || want === 'usa' || want === 'america') aliases.push('us');
+            if (want === 'us') aliases.push('unitedstates');
+            if (want === 'canada') aliases.push('ca');
+            if (want === 'ca') aliases.push('canada');
+            if (want === 'mexico') aliases.push('mx');
+            if (want === 'mx') aliases.push('mexico');
+            if (want === 'newjersey') aliases.push('nj');
+            if (want === 'nj') aliases.push('newjersey');
             var options = el.options || [];
             var match = null;
-            for (var i = 0; i < options.length; i++) {
-              var opt = options[i];
-              var key = norm((opt.value || '') + ' ' + (opt.text || '') + ' ' + (opt.label || ''));
-              if (!key) continue;
-              if (key === want || key.indexOf(want) !== -1 || want.indexOf(key) !== -1) {
-                match = opt;
-                if (key === want || norm(opt.value) === want || norm(opt.text) === want) break;
+            for (var a = 0; a < aliases.length && !match; a++) {
+              var alias = aliases[a];
+              for (var i = 0; i < options.length; i++) {
+                var opt = options[i];
+                var val = norm(opt.value || '');
+                var text = norm(opt.text || '');
+                var key = norm((opt.value || '') + ' ' + (opt.text || '') + ' ' + (opt.label || ''));
+                if (!key) continue;
+                if (val === alias || text === alias || key === alias) { match = opt; break; }
+                if (key.indexOf(alias) !== -1 || alias.indexOf(val) !== -1) {
+                  match = opt;
+                  if (val === alias || text === alias) break;
+                }
               }
             }
             if (!match) return false;
@@ -165,6 +182,13 @@ enum BookingFormPrefill {
             el.dispatchEvent(new Event('input', { bubbles: true }));
             el.dispatchEvent(new Event('change', { bubbles: true }));
             return true;
+          }
+          function firstVisible(selector) {
+            var nodes = document.querySelectorAll(selector);
+            for (var i = 0; i < nodes.length; i++) {
+              if (visible(nodes[i])) return nodes[i];
+            }
+            return null;
           }
           function labelText(el) {
             var t = '';
@@ -177,20 +201,29 @@ enum BookingFormPrefill {
             );
           }
           function classify(el) {
+            // Prefer id/name — ParkMobile vehicle selects concatenate label+id+name so
+            // /^country$/ never matched \"country country country\".
+            var id = norm(el.id || '');
+            var name = norm(el.name || '');
+            if (id === 'vrn' || name === 'vrn') return 'plate';
+            if (id === 'email' || name === 'email') return 'email';
+            if (id === 'phone' || name === 'phone') return 'phone';
+            if (id === 'country' || name === 'country') return 'country';
+            if (id === 'state' || name === 'state') return 'state';
             var key = labelText(el);
             if (!key) return null;
-            if (/(email|e-mail|mailaddress)/.test(key)) return 'email';
-            if (/(phone|mobile|tel|cellphone)/.test(key)) return 'phone';
-            // ParkMobile uses #vrn / name=vrn for license plate.
-            if (/(^vrn$|licenseplate|licenceplate|platenumber|platereg|vehicleplate|^plate$|lpnumber)/.test(key)) return 'plate';
-            if (/(makeandmodel|vehiclemake|carmake|vehiclemodel|carmodel|make|model|vehiclename|vehicledescription)/.test(key)
-                && !/(payment|card)/.test(key)) return 'makeModel';
-            if (/(vehiclecountry|platercountry|registrationcountry|countryregion|^country$)/.test(key)
-                && !/(phonecountry)/.test(key)) return 'country';
-            if (/(vehiclestate|platestate|registrationstate|stateprovince|province|^state$)/.test(key)
-                && !/(unitedstates|statement)/.test(key)) return 'state';
-            if (/(address1|addressline1|streetaddress|street|mailingaddress|billingaddress|homeaddress|^address$|residential)/.test(key)
-                && !/(email|phone|ip)/.test(key)) return 'address';
+            if (key.indexOf('email') !== -1 || key.indexOf('mailaddress') !== -1) return 'email';
+            if (key.indexOf('phone') !== -1 || key.indexOf('mobile') !== -1 || key.indexOf('tel') !== -1) return 'phone';
+            if (key.indexOf('licenseplate') !== -1 || key.indexOf('platenumber') !== -1
+                || key.indexOf('vehicleplate') !== -1 || key === 'plate' || key.indexOf('lpnumber') !== -1) return 'plate';
+            if ((key.indexOf('makeandmodel') !== -1 || key.indexOf('vehiclemake') !== -1
+                || key.indexOf('make') !== -1 || key.indexOf('model') !== -1)
+                && key.indexOf('payment') === -1 && key.indexOf('card') === -1) return 'makeModel';
+            if (key.indexOf('country') !== -1 && key.indexOf('phonecountry') === -1) return 'country';
+            if ((key.indexOf('state') !== -1 || key.indexOf('province') !== -1)
+                && key.indexOf('statement') === -1) return 'state';
+            if ((key.indexOf('address') !== -1 || key.indexOf('street') !== -1)
+                && key.indexOf('email') === -1 && key.indexOf('phone') === -1) return 'address';
             return null;
           }
           function textOf(el) {
@@ -262,37 +295,46 @@ enum BookingFormPrefill {
               if (applyKind(el, kind)) filled += 1;
             }
             if (cfg.email) {
-              var emailEl = document.querySelector('#email, input[name=\"email\"], input[type=\"email\"]');
-              if (emailEl && visible(emailEl) && !emailEl.value && setNativeValue(emailEl, cfg.email)) filled += 1;
+              var emailEl = firstVisible('#email, input[name=\"email\"], input[type=\"email\"], [data-testid=\"email-input\"]');
+              if (emailEl && !String(emailEl.value || '').trim() && setNativeValue(emailEl, cfg.email)) filled += 1;
             }
             if (cfg.phone) {
-              var phoneEl = document.querySelector('#phone, input[name=\"phone\"], input[type=\"tel\"]');
-              if (phoneEl && visible(phoneEl) && !phoneEl.value && setNativeValue(phoneEl, cfg.phone)) filled += 1;
+              var phoneEl = firstVisible('#phone, input[name=\"phone\"], input[type=\"tel\"], [data-testid=\"phone-input\"]');
+              if (phoneEl && !String(phoneEl.value || '').trim() && setNativeValue(phoneEl, cfg.phone)) filled += 1;
             }
+            // ParkMobile vehicle block: always target *visible* #vrn/#country/#state
+            // (page mounts hidden duplicates that break querySelector).
             if (cfg.licensePlateNumber) {
-              // ParkMobile vehicle plate field is #vrn (Vehicle Registration Number).
-              var plateEl = document.querySelector(
-                '#vrn, input[name=\"vrn\"], #licensePlate, #license-plate, #plate, input[name*=\"plate\" i], input[id*=\"plate\" i], input[name*=\"license\" i]'
+              var plateEl = firstVisible(
+                '#vrn, input[name=\"vrn\"], #licensePlate, #license-plate, #plate, input[name*=\"plate\" i], input[id*=\"plate\" i], input[name*=\"license\" i], [data-testid=\"Vehicle-input-plate\"]'
               );
-              if (plateEl && visible(plateEl) && !plateEl.value && setNativeValue(plateEl, cfg.licensePlateNumber)) filled += 1;
+              if (plateEl && !String(plateEl.value || '').trim() && setNativeValue(plateEl, cfg.licensePlateNumber)) filled += 1;
             }
             if (cfg.makeAndModel) {
-              var makeEl = document.querySelector(
+              var makeEl = firstVisible(
                 'input[name*=\"make\" i], input[id*=\"make\" i], input[name*=\"model\" i], input[id*=\"vehicle\" i], textarea[name*=\"vehicle\" i]'
               );
-              if (makeEl && visible(makeEl) && !makeEl.value && setNativeValue(makeEl, cfg.makeAndModel)) filled += 1;
+              if (makeEl && !String(makeEl.value || '').trim() && setNativeValue(makeEl, cfg.makeAndModel)) filled += 1;
             }
             if (cfg.country) {
-              var countryEl = document.querySelector(
-                'select#country, select[name=\"country\"], select[name*=\"country\" i], select[id*=\"country\" i], input[name*=\"country\" i], input[id*=\"country\" i]'
+              var countryEl = firstVisible(
+                'select#country, select[name=\"country\"], select[name*=\"country\" i], select[id*=\"country\" i]'
               );
-              if (countryEl && visible(countryEl) && setNativeValue(countryEl, cfg.country)) filled += 1;
+              if (countryEl) {
+                var needsCountry = !String(countryEl.value || '').trim() || countryEl.selectedIndex <= 0
+                  || norm(countryEl.value) !== norm(cfg.country);
+                if (needsCountry && setNativeValue(countryEl, cfg.country)) filled += 1;
+              }
             }
             if (cfg.state) {
-              var stateEl = document.querySelector(
-                'select#state, select[name=\"state\"], select[name*=\"state\" i], select[id*=\"state\" i], select[name*=\"province\" i], input[name*=\"state\" i], input[id*=\"state\" i]'
+              var stateEl = firstVisible(
+                'select#state, select[name=\"state\"], select[name*=\"state\" i], select[id*=\"state\" i], select[name*=\"province\" i], [data-testid=\"Vehicle-input-state\"]'
               );
-              if (stateEl && visible(stateEl) && setNativeValue(stateEl, cfg.state)) filled += 1;
+              if (stateEl) {
+                var needsState = !String(stateEl.value || '').trim() || stateEl.selectedIndex <= 0
+                  || norm(stateEl.value) !== norm(cfg.state);
+                if (needsState && setNativeValue(stateEl, cfg.state)) filled += 1;
+              }
             }
             return filled;
           }
@@ -336,15 +378,20 @@ enum BookingFormPrefill {
             return true;
           }
 
-          function spotHeroMakeModelInput() {
-            var root = document.querySelector(
+          function spotHeroMakeModelRoot() {
+            return document.querySelector(
               '[data-testid=\"AddVehicle-autosuggest-vehicle\"], [data-testid=\"Vehicle-autosuggest-vehicle\"]'
             );
+          }
+
+          function spotHeroMakeModelInput() {
+            var named = firstVisible('#addVehicleInfoId');
+            if (named) return named;
+            var root = spotHeroMakeModelRoot();
             if (root) {
               var input = root.querySelector('input');
               if (input && visible(input)) return input;
             }
-            // Label-based fallback for Make and Model.
             var labeled = Array.prototype.find.call(
               document.querySelectorAll('input'),
               function(el) {
@@ -355,91 +402,136 @@ enum BookingFormPrefill {
             return labeled || null;
           }
 
+          function spotHeroSelectedMakeModel() {
+            var root = spotHeroMakeModelRoot();
+            if (!root) return '';
+            var single = root.querySelector('.fe-ui-async-select__single-value, [class*=\"single-value\"]');
+            return single ? String(single.textContent || '').trim() : '';
+          }
+
           function selectSpotHeroMakeModelOption(want) {
             var wantKey = norm(want);
             var options = document.querySelectorAll(
-              '[role=\"option\"], [class*=\"option\" i], [class*=\"menu\" i] [id*=\"option\"], li, div[class*=\"suggest\" i]'
+              '.fe-ui-async-select__option, [id^=\"react-select-\"][id*=\"-option-\"], [role=\"option\"]'
             );
             var best = null;
-            for (var i = 0; i < Math.min(options.length, 80); i++) {
+            var bestScore = -1;
+            for (var i = 0; i < Math.min(options.length, 40); i++) {
               var el = options[i];
               if (!visible(el)) continue;
-              var t = norm(el.innerText || el.textContent || '');
-              if (!t || t.length > 80) continue;
-              if (t === wantKey || t.indexOf(wantKey) !== -1 || wantKey.indexOf(t) !== -1) {
-                best = el;
-                break;
-              }
-              // Prefer exact-ish brand+model matches over \"Vehicle Not Listed\".
-              if (!best && /chevrolet|impala|honda|toyota|ford|bmw/.test(t) && wantKey && t.indexOf(wantKey.slice(0, 4)) !== -1) {
-                best = el;
-              }
+              var raw = String(el.innerText || el.textContent || '').trim();
+              var t = norm(raw);
+              if (!t || /vehiclenotlisted/.test(t)) continue;
+              var score = 0;
+              if (t === wantKey) score = 100;
+              else if (t.indexOf(wantKey) === 0) score = 80;
+              else if (t.indexOf(wantKey) !== -1) score = 60;
+              else if (wantKey.indexOf(t) !== -1 && t.length >= 6) score = 40;
+              if (score > bestScore) { bestScore = score; best = el; }
             }
-            if (!best) {
-              // Last resort: first visible autosuggest option that isn't a prompt.
-              for (var j = 0; j < Math.min(options.length, 40); j++) {
-                var opt = options[j];
-                if (!visible(opt)) continue;
-                var ot = norm(opt.innerText || opt.textContent || '');
-                if (!ot || /typenosearch|noselection|select/.test(ot)) continue;
-                if (/vehiclenotlisted/.test(ot) && wantKey) continue;
-                best = opt;
-                break;
-              }
-            }
-            if (!best) return false;
+            if (!best || bestScore < 40) return false;
             return click(best);
           }
 
           function fillSpotHeroVehicleModal() {
-            if (!cfg.makeAndModel && !cfg.licensePlateNumber && !cfg.state) return 0;
+            var modal = document.querySelector('[data-testid=\"AddVehicle\"], [data-testid=\"VehicleInfo-modal-button-confirm\"]');
+            if (!modal && !spotHeroMakeModelInput() && !firstVisible('#addVehicleLicensePlate, [data-testid=\"AddVehicle-input-plate\"]')) {
+              return 0;
+            }
             var filled = 0;
+
+            // 1) Make and Model — must pick a dropdown option (typed text alone is not enough).
+            var selected = spotHeroSelectedMakeModel();
             var makeInput = spotHeroMakeModelInput();
-            if (makeInput && cfg.makeAndModel) {
-              var current = String(makeInput.value || '').trim();
-              var selectedShown = document.querySelector(
-                '[data-testid=\"AddVehicle-autosuggest-vehicle\"] [class*=\"single-value\" i], [data-testid=\"Vehicle-autosuggest-vehicle\"] [class*=\"single-value\" i]'
+            if (cfg.makeAndModel && makeInput && norm(selected).indexOf(norm(cfg.makeAndModel)) === -1) {
+              try { makeInput.focus(); makeInput.click(); } catch (e) {}
+              if (setNativeValue(makeInput, cfg.makeAndModel)) filled += 1;
+              try {
+                makeInput.dispatchEvent(new InputEvent('input', { bubbles: true, data: cfg.makeAndModel, inputType: 'insertText' }));
+              } catch (e) {}
+              if (selectSpotHeroMakeModelOption(cfg.makeAndModel)) filled += 1;
+            }
+
+            // 2) License plate — AddVehicle modal uses AddVehicle-input-plate / #addVehicleLicensePlate.
+            if (cfg.licensePlateNumber) {
+              var plate = firstVisible(
+                '#addVehicleLicensePlate, [data-testid=\"AddVehicle-input-plate\"], [data-testid=\"Vehicle-input-plate\"]'
               );
-              var already = selectedShown && norm(selectedShown.textContent).indexOf(norm(cfg.makeAndModel)) !== -1;
-              if (!already) {
-                try { makeInput.focus(); } catch (e) {}
-                if (setNativeValue(makeInput, cfg.makeAndModel)) filled += 1;
-                try {
-                  makeInput.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowDown' }));
-                } catch (e) {}
-                if (selectSpotHeroMakeModelOption(cfg.makeAndModel)) filled += 1;
+              if (plate && !String(plate.value || '').trim() && setNativeValue(plate, cfg.licensePlateNumber)) filled += 1;
+            }
+
+            // 3) State / Province — AddVehicle-input-state / #addVehicleState (no Country on SpotHero modal).
+            if (cfg.state) {
+              var state = firstVisible(
+                '#addVehicleState, [data-testid=\"AddVehicle-input-state\"], [data-testid=\"Vehicle-input-state\"]'
+              );
+              if (state) {
+                var needsState = !String(state.value || '').trim() || state.selectedIndex <= 0
+                  || norm(state.value) !== norm(cfg.state);
+                if (needsState && setNativeValue(state, cfg.state)) filled += 1;
               }
             }
 
-            var plate = document.querySelector(
-              '[data-testid=\"Vehicle-input-plate\"], input[name*=\"plate\" i], input[id*=\"plate\" i]'
-            );
-            if (plate && visible(plate) && cfg.licensePlateNumber && !String(plate.value || '').trim()) {
-              if (setNativeValue(plate, cfg.licensePlateNumber)) filled += 1;
-            }
-
-            var state = document.querySelector(
-              '[data-testid=\"Vehicle-input-state\"], select[name*=\"state\" i], select[id*=\"state\" i]'
-            );
-            if (state && visible(state) && cfg.state) {
-              if (setNativeValue(state, cfg.state)) filled += 1;
+            // 4) Country if a variant ever shows it.
+            if (cfg.country) {
+              var country = firstVisible(
+                '#addVehicleCountry, [data-testid=\"AddVehicle-input-country\"], [data-testid=\"Vehicle-input-country\"], select[name*=\"country\" i]'
+              );
+              if (country && country.closest('[data-testid=\"AddVehicle\"], [role=\"dialog\"], .chakra-modal__content')) {
+                var needsCountry = !String(country.value || '').trim() || country.selectedIndex <= 0
+                  || norm(country.value) !== norm(cfg.country);
+                if (needsCountry && setNativeValue(country, cfg.country)) filled += 1;
+              }
             }
             return filled;
+          }
+
+          function spotHeroVehicleModalReady() {
+            var selected = spotHeroSelectedMakeModel();
+            var hasMake = !!(selected && selected.length > 0);
+            // Require dropdown selection — typed text in the input does NOT count.
+            if (cfg.makeAndModel && !hasMake) return false;
+
+            var plate = firstVisible(
+              '#addVehicleLicensePlate, [data-testid=\"AddVehicle-input-plate\"], [data-testid=\"Vehicle-input-plate\"]'
+            );
+            if (cfg.licensePlateNumber) {
+              if (!plate || !String(plate.value || '').trim()) return false;
+            }
+
+            var state = firstVisible(
+              '#addVehicleState, [data-testid=\"AddVehicle-input-state\"], [data-testid=\"Vehicle-input-state\"]'
+            );
+            if (cfg.state) {
+              if (!state || !String(state.value || '').trim() || state.selectedIndex <= 0) return false;
+            }
+
+            var country = firstVisible(
+              '#addVehicleCountry, [data-testid=\"AddVehicle-input-country\"], [data-testid=\"Vehicle-input-country\"]'
+            );
+            if (country && visible(country) && cfg.country) {
+              if (!String(country.value || '').trim() || country.selectedIndex <= 0) return false;
+            }
+
+            // Don't confirm while the make/model menu is still open.
+            if (document.querySelector('.fe-ui-async-select__menu')) return false;
+            return hasMake || !cfg.makeAndModel;
           }
 
           function clickSpotHeroVehicleConfirm() {
             var now = Date.now();
             if (window.__parkingSpotHeroConfirmAt && (now - window.__parkingSpotHeroConfirmAt) < 2500) return false;
+            if (!spotHeroVehicleModalReady()) return false;
+
             var btn = document.querySelector('[data-testid=\"VehicleInfo-modal-button-confirm\"]');
             if (!btn || !visible(btn)) {
-              // Only accept a Confirm that sits in a vehicle modal (has make/model or plate fields).
               var dialogs = document.querySelectorAll('[role=\"dialog\"], .chakra-modal__content');
               btn = null;
               for (var i = 0; i < dialogs.length; i++) {
                 var dlg = dialogs[i];
                 if (!visible(dlg)) continue;
                 if (/payment/i.test(dlg.innerText || '')) continue;
-                if (!/(makeandmodel|licenseplate|vehiclenotlisted)/.test(norm(dlg.innerText || ''))) continue;
+                if (!/(makeandmodel|licenseplate|stateorprovince|vehiclenotlisted)/.test(norm(dlg.innerText || ''))) continue;
                 var cand = Array.prototype.find.call(dlg.querySelectorAll('button,[role=\"button\"]'), function(el) {
                   return visible(el) && /^confirm$/i.test((el.innerText || '').trim());
                 });
@@ -447,18 +539,6 @@ enum BookingFormPrefill {
               }
             }
             if (!btn || !visible(btn) || btn.disabled) return false;
-
-            // Only confirm if make/model looks selected or plate filled.
-            var makeInput = spotHeroMakeModelInput();
-            var selectedShown = document.querySelector(
-              '[data-testid=\"AddVehicle-autosuggest-vehicle\"] [class*=\"single-value\" i], [data-testid=\"Vehicle-autosuggest-vehicle\"] [class*=\"single-value\" i]'
-            );
-            var plate = document.querySelector('[data-testid=\"Vehicle-input-plate\"]');
-            var hasMake = !!(selectedShown && String(selectedShown.textContent || '').trim())
-              || !!(makeInput && String(makeInput.value || '').trim());
-            var hasPlate = !!(plate && visible(plate) && String(plate.value || '').trim());
-            if (!hasMake && !hasPlate) return false;
-
             if (!click(btn)) return false;
             window.__parkingSpotHeroConfirmAt = now;
             return true;
@@ -485,11 +565,11 @@ enum BookingFormPrefill {
             );
             if (!btn || btn.disabled) return false;
 
-            var email = document.querySelector('#email, input[name=\"email\"], input[type=\"email\"]');
-            var phone = document.querySelector('#phone, input[name=\"phone\"], input[type=\"tel\"]');
-            var plate = document.querySelector('#vrn, input[name=\"vrn\"]');
-            var country = document.querySelector('select#country, select[name=\"country\"]');
-            var state = document.querySelector('select#state, select[name=\"state\"]');
+            var email = firstVisible('#email, input[name=\"email\"], input[type=\"email\"]');
+            var phone = firstVisible('#phone, input[name=\"phone\"], input[type=\"tel\"]');
+            var plate = firstVisible('#vrn, input[name=\"vrn\"]');
+            var country = firstVisible('select#country, select[name=\"country\"]');
+            var state = firstVisible('select#state, select[name=\"state\"]');
 
             var onContact = !!((email && visible(email)) || (phone && visible(phone)));
             var onVehicle = !!(plate && visible(plate));
@@ -515,14 +595,14 @@ enum BookingFormPrefill {
             if (/novehicleinformationisrequired/.test(body)) return false;
             if (document.querySelector('[data-testid=\"VehicleInfo-button-add-vehicle\"]')) return true;
             if (spotHeroMakeModelInput()) return true;
-            var plate = document.querySelector('#vrn, input[name=\"vrn\"], [data-testid=\"Vehicle-input-plate\"]');
-            return !!(plate && visible(plate));
+            var plate = firstVisible('#vrn, input[name=\"vrn\"], [data-testid=\"Vehicle-input-plate\"]');
+            return !!plate;
           }
 
           function contactSectionNeedsInput() {
-            var email = document.querySelector('#email, input[name=\"email\"], input[type=\"email\"], [data-testid=\"email-input\"]');
-            var phone = document.querySelector('#phone, input[name=\"phone\"], input[type=\"tel\"], [data-testid=\"phone-input\"]');
-            return !!((email && visible(email)) || (phone && visible(phone)));
+            var email = firstVisible('#email, input[name=\"email\"], input[type=\"email\"], [data-testid=\"email-input\"]');
+            var phone = firstVisible('#phone, input[name=\"phone\"], input[type=\"tel\"], [data-testid=\"phone-input\"]');
+            return !!(email || phone);
           }
 
           function fillOnce() {
