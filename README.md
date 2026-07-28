@@ -1,6 +1,6 @@
 # Web Auto Parking (iOS)
 
-SwiftUI wrapper that opens provider checkout in a `WKWebView`, starting at the **next 15-minute mark**, with automated guest/contact/vehicle steps on ParkMobile and SpotHero.
+SwiftUI wrapper that opens provider checkout in a `WKWebView`, defaulting to the **last 15-minute mark** start (toggle ASAP / −15m / −30m), with automated guest/contact/vehicle steps on ParkMobile and SpotHero.
 
 ## Prefill config (edit by hand)
 
@@ -56,7 +56,7 @@ Presets above are saved by default (existing installs pick up missing ones on ne
 
 | Setting | Fixed duration | Flexible |
 |---------|----------------|----------|
-| **Start** | Next **15-minute** mark | Same |
+| **Start** | **Last 15m** mark by default (or ASAP / last 30m) | Same |
 | **Duration** | Global **3–6h** (config + in-app toggle) | Not forced — checkout may add **free extra time** |
 | **End** | Start + duration | Omitted so the rate package can extend |
 

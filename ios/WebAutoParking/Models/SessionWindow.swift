@@ -1,7 +1,7 @@
 import Foundation
 
 enum SessionWindow {
-    /// Checkout start/end pickers snap to this many minutes.
+    /// Checkout start/end pickers snap to this many minutes for ASAP.
     static let snapMinutes = 15
 
     /// Active global duration (3–6), from in-app preference / config.
@@ -10,12 +10,30 @@ enum SessionWindow {
         SessionPreferences.shared.durationHours
     }
 
-    /// Next quarter-hour boundary at or after `date`.
-    /// If `date` is already exactly on a mark (0s), that mark is used.
-    static func nextFifteenMinuteMark(
-        after date: Date = .now,
+    /// Resolve reservation start from the selected mode.
+    static func startDate(
+        mode: ReservationStartMode,
+        from date: Date = .now,
         calendar: Calendar = .current
     ) -> Date {
+        switch mode {
+        case .asap:
+            return nextMinuteMark(atOrAfter: date, interval: snapMinutes, calendar: calendar)
+        case .last15:
+            return previousMinuteMark(atOrBefore: date, interval: 15, calendar: calendar)
+        case .last30:
+            return previousMinuteMark(atOrBefore: date, interval: 30, calendar: calendar)
+        }
+    }
+
+    /// Next `interval`-minute boundary at or after `date`.
+    /// If `date` is already exactly on a mark (0s), that mark is used.
+    static func nextMinuteMark(
+        atOrAfter date: Date,
+        interval: Int,
+        calendar: Calendar = .current
+    ) -> Date {
+        let snap = max(interval, 1)
         let comps = calendar.dateComponents(
             [.year, .month, .day, .hour, .minute, .second, .nanosecond],
             from: date
@@ -24,7 +42,7 @@ enum SessionWindow {
         let second = comps.second ?? 0
         let nanosecond = comps.nanosecond ?? 0
 
-        let onMark = minute % snapMinutes == 0 && second == 0 && nanosecond == 0
+        let onMark = minute % snap == 0 && second == 0 && nanosecond == 0
         if onMark {
             return calendar.date(from: DateComponents(
                 year: comps.year,
@@ -36,7 +54,7 @@ enum SessionWindow {
             )) ?? date
         }
 
-        let minutesToAdd = snapMinutes - (minute % snapMinutes)
+        let minutesToAdd = snap - (minute % snap)
         guard
             let truncated = calendar.date(from: DateComponents(
                 year: comps.year,
@@ -53,14 +71,46 @@ enum SessionWindow {
         return snapped
     }
 
-    /// Start = next 15-minute mark; end = start + duration.
+    /// Previous `interval`-minute boundary at or before `date` (floors to the mark).
+    static func previousMinuteMark(
+        atOrBefore date: Date,
+        interval: Int,
+        calendar: Calendar = .current
+    ) -> Date {
+        let snap = max(interval, 1)
+        let comps = calendar.dateComponents(
+            [.year, .month, .day, .hour, .minute],
+            from: date
+        )
+        let minute = comps.minute ?? 0
+        let floored = minute - (minute % snap)
+        return calendar.date(from: DateComponents(
+            year: comps.year,
+            month: comps.month,
+            day: comps.day,
+            hour: comps.hour,
+            minute: floored,
+            second: 0
+        )) ?? date
+    }
+
+    /// Next quarter-hour boundary at or after `date` (ASAP helper).
+    static func nextFifteenMinuteMark(
+        after date: Date = .now,
+        calendar: Calendar = .current
+    ) -> Date {
+        nextMinuteMark(atOrAfter: date, interval: snapMinutes, calendar: calendar)
+    }
+
+    /// Start from mode; end = start + duration.
     static func bookingWindow(
         from date: Date = .now,
         calendar: Calendar = .current,
-        durationHours: Int
+        durationHours: Int,
+        startMode: ReservationStartMode = .last15
     ) -> (start: Date, end: Date) {
         let hours = BookingConfig.clampDuration(durationHours)
-        let start = nextFifteenMinuteMark(after: date, calendar: calendar)
+        let start = startDate(mode: startMode, from: date, calendar: calendar)
         let end = calendar.date(byAdding: .hour, value: hours, to: start) ?? start
         return (start, end)
     }
@@ -91,10 +141,16 @@ enum SessionWindow {
     static func displayRange(
         from date: Date = .now,
         calendar: Calendar = .current,
-        durationHours: Int
+        durationHours: Int,
+        startMode: ReservationStartMode = .last15
     ) -> String {
         let hours = BookingConfig.clampDuration(durationHours)
-        let window = bookingWindow(from: date, calendar: calendar, durationHours: hours)
+        let window = bookingWindow(
+            from: date,
+            calendar: calendar,
+            durationHours: hours,
+            startMode: startMode
+        )
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.locale = .current
@@ -103,6 +159,6 @@ enum SessionWindow {
         let startText = formatter.string(from: window.start)
         formatter.dateFormat = "h:mm a"
         let endText = formatter.string(from: window.end)
-        return "\(startText) → \(endText) · fixed \(hours)h · flexible rate package"
+        return "\(startText) → \(endText) · \(startMode.shortLabel) · fixed \(hours)h"
     }
 }

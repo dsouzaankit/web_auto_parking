@@ -48,14 +48,15 @@ struct Garage: Identifiable, Codable, Equatable, Hashable {
     /// Stable list identity across providers.
     var id: String { "\(provider.rawValue):\(facilityID)" }
 
-    /// Opens checkout starting at the **next 15-minute mark**.
+    /// Opens checkout using the selected start mode (ASAP / last 15 / last 30) and duration.
     /// Fixed-duration providers lock end to the global 3–6h setting; flexible ones leave duration to the rate package.
     func reservationURL(
         from date: Date = .now,
         calendar: Calendar = .current,
-        durationHours: Int = 4
+        durationHours: Int = 4,
+        startMode: ReservationStartMode = .last15
     ) -> URL {
-        let start = SessionWindow.nextFifteenMinuteMark(after: date, calendar: calendar)
+        let start = SessionWindow.startDate(mode: startMode, from: date, calendar: calendar)
         switch provider {
         case .fixedDuration:
             let hours = BookingConfig.clampDuration(durationHours)
