@@ -3,17 +3,26 @@ import SwiftUI
 @main
 struct WebAutoParkingApp: App {
     @StateObject private var store = GarageStore()
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         AppLog.ensureReady()
         AppLog.log("App launch")
-        LANLogServer.ensureRunning()
     }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(store)
+                .onAppear {
+                    // Start after a scene is visible so Local Network permission can prompt.
+                    LANLogServer.ensureRunning()
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active {
+                        LANLogServer.ensureRunning()
+                    }
+                }
         }
     }
 }

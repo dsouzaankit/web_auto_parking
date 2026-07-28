@@ -16,7 +16,7 @@
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Parking serves debug logs on your Wi‑Fi so you can open them from a PC browser.</string>
+	<string>Parking serves debug logs on your Wi‑Fi so you can open them from a PC browser on the same network.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_http._tcp</string>

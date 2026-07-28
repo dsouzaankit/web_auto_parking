@@ -14,6 +14,8 @@ enum LANLogServer {
     private static var listener: NWListener?
     private static var listenerIsReady = false
     private static var startInFlight = false
+    private static var addressInUseRetryCount = 0
+    private static let maxAddressInUseRetries = 2
     private static var connections: [ObjectIdentifier: NWConnection] = [:]
     private static let queue = DispatchQueue(label: "com.webautoparking.lan-log-server")
     private static var advertisedBaseURL: String?
@@ -39,6 +41,7 @@ enum LANLogServer {
         "\(deviceMDNSHostLabel()).local"
     }
 
+    /// Call from a visible scene (e.g. `onAppear`) so the Local Network permission prompt can show.
     static func ensureRunning() {
         guard isEnabled else { return }
         lock.lock()
@@ -78,18 +81,24 @@ enum LANLogServer {
                 startInFlight = false
                 lock.unlock()
             }
-            beginListen()
+            beginListenAttempt()
         }
     }
 
     static func stop() {
         queue.async {
-            stopOnQueue()
+            stopOnQueue(resetAddressInUseRetries: true)
         }
     }
 
-    private static func beginListen() {
+    private static func beginListenAttempt(delaySeconds: TimeInterval = 0) {
         guard isEnabled else { return }
+        if delaySeconds > 0 {
+            queue.asyncAfter(deadline: .now() + delaySeconds) {
+                beginListenAttempt()
+            }
+            return
+        }
 
         lock.lock()
         if listenerIsReady, listener != nil {
@@ -104,14 +113,18 @@ enum LANLogServer {
 
         do {
             let port = NWEndpoint.Port(rawValue: defaultPort)!
-            let params = NWParameters.tcp
+            let tcp = NWProtocolTCP.Options()
+            let params = NWParameters(tls: nil, tcp: tcp)
             params.allowLocalEndpointReuse = true
+            params.includePeerToPeer = true
+
             let nwListener = try NWListener(using: params, on: port)
             let ipForTXT = primaryLANIPv4Address()
             var txtRecord: Data?
             if let ipForTXT, !ipForTXT.isEmpty {
                 txtRecord = NetService.data(fromTXTRecord: ["ip": Data(ipForTXT.utf8)])
             }
+            // Bonjour publish triggers the Local Network permission dialog.
             nwListener.service = NWListener.Service(
                 name: bonjourServiceName,
                 type: "_http._tcp",
@@ -130,6 +143,7 @@ enum LANLogServer {
                     let ipURL = ip.map { "http://\($0):\(defaultPort)/" }
                     lock.lock()
                     listenerIsReady = true
+                    addressInUseRetryCount = 0
                     advertisedBaseURL = hostURL
                     advertisedIPAddressURL = ipURL
                     lock.unlock()
@@ -139,7 +153,13 @@ enum LANLogServer {
                     AppLog.log("LAN: Windows often cannot resolve .local — prefer the IP URL")
                 case .failed(let error):
                     AppLog.log("LAN log server failed: \(error.localizedDescription)")
-                    stopOnQueue()
+                    lock.lock()
+                    let retries = addressInUseRetryCount
+                    lock.unlock()
+                    stopOnQueue(resetAddressInUseRetries: false)
+                    scheduleListenRetryIfNeeded(error: error, priorRetries: retries)
+                case .waiting(let error):
+                    AppLog.log("LAN log server waiting: \(error.localizedDescription)")
                 case .cancelled:
                     lock.lock()
                     listenerIsReady = false
@@ -150,11 +170,12 @@ enum LANLogServer {
             }
 
             nwListener.newConnectionHandler = { connection in
-                connection.start(queue: queue)
                 let id = ObjectIdentifier(connection)
                 lock.lock()
                 connections[id] = connection
                 lock.unlock()
+                AppLog.log("LAN accept \(String(describing: connection.endpoint))")
+                connection.start(queue: queue)
                 receiveRequest(on: connection) { [id] in
                     lock.lock()
                     connections.removeValue(forKey: id)
@@ -165,14 +186,38 @@ enum LANLogServer {
             nwListener.start(queue: queue)
         } catch {
             AppLog.log("LAN log server could not start: \(error.localizedDescription)")
+            lock.lock()
+            let retries = addressInUseRetryCount
+            lock.unlock()
+            scheduleListenRetryIfNeeded(error: error, priorRetries: retries)
         }
     }
 
-    private static func stopOnQueue() {
+    private static func scheduleListenRetryIfNeeded(error: Error, priorRetries: Int) {
+        guard isEnabled, isAddressAlreadyInUse(error), priorRetries < maxAddressInUseRetries else { return }
+        let attempt = priorRetries + 1
+        lock.lock()
+        addressInUseRetryCount = attempt
+        lock.unlock()
+        AppLog.log("LAN: port \(defaultPort) in use — retry \(attempt)/\(maxAddressInUseRetries)")
+        beginListenAttempt(delaySeconds: 0.5)
+    }
+
+    private static func isAddressAlreadyInUse(_ error: Error) -> Bool {
+        let ns = error as NSError
+        if ns.domain == NSPOSIXErrorDomain, ns.code == EADDRINUSE { return true }
+        let text = error.localizedDescription.lowercased()
+        return text.contains("address already in use") || text.contains("48")
+    }
+
+    private static func stopOnQueue(resetAddressInUseRetries: Bool) {
         lock.lock()
         let active = listener
         listener = nil
         listenerIsReady = false
+        if resetAddressInUseRetries {
+            addressInUseRetryCount = 0
+        }
         advertisedBaseURL = nil
         advertisedIPAddressURL = nil
         let open = Array(connections.values)
@@ -185,8 +230,38 @@ enum LANLogServer {
 
     // MARK: - HTTP
 
+    private static func performWhenReady(
+        connection: NWConnection,
+        onFailure: @escaping () -> Void,
+        work: @escaping () -> Void
+    ) {
+        if connection.state == .ready {
+            work()
+            return
+        }
+        connection.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                connection.stateUpdateHandler = nil
+                work()
+            case .failed(let error):
+                connection.stateUpdateHandler = nil
+                AppLog.log("LAN conn failed: \(error.localizedDescription)")
+                connection.cancel()
+                onFailure()
+            case .cancelled:
+                connection.stateUpdateHandler = nil
+                onFailure()
+            default:
+                break
+            }
+        }
+    }
+
     private static func receiveRequest(on connection: NWConnection, done: @escaping () -> Void) {
-        receiveHTTPHeaders(on: connection, accumulated: Data(), done: done)
+        performWhenReady(connection: connection, onFailure: done) {
+            receiveHTTPHeaders(on: connection, accumulated: Data(), done: done)
+        }
     }
 
     private static func receiveHTTPHeaders(
@@ -194,13 +269,19 @@ enum LANLogServer {
         accumulated: Data,
         done: @escaping () -> Void
     ) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { data, _, _, error in
-            if error != nil {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { data, _, isComplete, error in
+            if let error {
+                AppLog.log("LAN recv error: \(error.localizedDescription)")
                 connection.cancel()
                 done()
                 return
             }
             guard let data, !data.isEmpty else {
+                if isComplete {
+                    connection.cancel()
+                    done()
+                    return
+                }
                 sendResponse(connection: connection, status: 400, contentType: "text/plain", body: Data("Bad request".utf8), done: done)
                 return
             }
@@ -221,6 +302,7 @@ enum LANLogServer {
                 sendResponse(connection: connection, status: 400, contentType: "text/plain", body: Data("Bad request".utf8), done: done)
                 return
             }
+            AppLog.log("LAN \(method) \(path)")
             handleGET(method: method, path: path, connection: connection, done: done)
         }
     }
@@ -335,13 +417,17 @@ enum LANLogServer {
         header += "Content-Length: \(body.count)\r\n"
         header += "Connection: close\r\n"
         header += "Cache-Control: no-store\r\n"
+        header += "Access-Control-Allow-Origin: *\r\n"
         for line in extraHeaders {
             header += "\(line)\r\n"
         }
         header += "\r\n"
         var data = Data(header.utf8)
         data.append(body)
-        connection.send(content: data, completion: .contentProcessed { _ in
+        connection.send(content: data, completion: .contentProcessed { error in
+            if let error {
+                AppLog.log("LAN send error: \(error.localizedDescription)")
+            }
             connection.cancel()
             done()
         })
