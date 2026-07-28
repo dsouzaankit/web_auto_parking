@@ -18,12 +18,13 @@ struct ParkingWebView: View {
 
             // Pass model without @ObservedObject so KVO/nav updates do not recreate the UIView.
             WebViewRepresentable(url: url, model: model)
-                .ignoresSafeArea(edges: .bottom)
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItemGroup(placement: .bottomBar) {
+            // Keep controls in the nav bar — a .bottomBar sits behind/under the TabView tab bar.
+            // Trailing only so a pushed garage screen still has room for the system Back.
+            ToolbarItemGroup(placement: .topBarTrailing) {
                 Button {
                     model.goBack()
                 } label: {
@@ -37,8 +38,6 @@ struct ParkingWebView: View {
                     Image(systemName: "chevron.forward")
                 }
                 .disabled(!model.canGoForward)
-
-                Spacer()
 
                 Button {
                     model.reload()
