@@ -9,11 +9,12 @@ struct ParkingWebView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if model.isLoading {
-                ProgressView(value: model.progress)
-                    .progressViewStyle(.linear)
-                    .tint(.accentColor)
-            }
+            ProgressView(value: max(model.progress, 0.02))
+                .progressViewStyle(.linear)
+                .tint(.accentColor)
+                .opacity(model.isLoading ? 1 : 0)
+                .animation(.easeOut(duration: 0.15), value: model.isLoading)
+                .frame(height: 2)
 
             WebViewRepresentable(url: url, model: model)
                 .ignoresSafeArea(edges: .bottom)
@@ -76,9 +77,13 @@ struct WebViewRepresentable: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> WKWebView {
+        let preferences = WKWebpagePreferences()
+        preferences.allowsContentJavaScript = true
+
         let config = WKWebViewConfiguration()
-        config.defaultWebpagePreferences.allowsContentJavaScript = true
+        config.defaultWebpagePreferences = preferences
         config.websiteDataStore = .default()
+        config.allowsInlineMediaPlayback = true
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
@@ -86,7 +91,7 @@ struct WebViewRepresentable: UIViewRepresentable {
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
 
-        context.coordinator.attach(to: webView)
+        context.coordinator.bind(webView)
         model.webView = webView
         AppLog.log("WebView create \(url.absoluteString)")
         webView.load(URLRequest(url: url))
@@ -94,15 +99,12 @@ struct WebViewRepresentable: UIViewRepresentable {
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
-        // Keep the same session; only load if nothing is loaded yet.
-        if webView.url == nil, !webView.isLoading {
-            webView.load(URLRequest(url: url))
-        }
+        // Do not reload on SwiftUI refreshes.
     }
 
     static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
         AppLog.log("WebView dismantle")
-        coordinator.detach()
+        coordinator.unbind()
         uiView.stopLoading()
         uiView.navigationDelegate = nil
         uiView.uiDelegate = nil
@@ -111,94 +113,87 @@ struct WebViewRepresentable: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         private let model: WebViewModel
         private var observations: [NSKeyValueObservation] = []
-        private weak var webView: WKWebView?
+        private var prefillWorkItem: DispatchWorkItem?
 
         init(model: WebViewModel) {
             self.model = model
         }
 
-        func attach(to webView: WKWebView) {
-            detach()
-            self.webView = webView
+        func bind(_ webView: WKWebView) {
+            unbind()
+            // Only progress KVO — navigation flags come from delegate callbacks to avoid SwiftUI thrash.
             observations = [
                 webView.observe(\.estimatedProgress, options: [.new]) { [weak self] view, _ in
                     let progress = view.estimatedProgress
-                    self?.onMain {
+                    DispatchQueue.main.async {
                         self?.model.progress = progress
-                        self?.model.isLoading = progress < 1
+                        self?.model.isLoading = progress > 0 && progress < 1
                     }
-                },
-                webView.observe(\.canGoBack, options: [.new]) { [weak self] view, _ in
-                    let value = view.canGoBack
-                    self?.onMain { self?.model.canGoBack = value }
-                },
-                webView.observe(\.canGoForward, options: [.new]) { [weak self] view, _ in
-                    let value = view.canGoForward
-                    self?.onMain { self?.model.canGoForward = value }
-                },
-                webView.observe(\.url, options: [.new]) { [weak self] view, _ in
-                    let url = view.url
-                    self?.onMain { self?.model.currentURL = url }
-                },
-                webView.observe(\.isLoading, options: [.new]) { [weak self] view, _ in
-                    let loading = view.isLoading
-                    self?.onMain { self?.model.isLoading = loading }
-                },
+                }
             ]
-            sync(webView)
         }
 
-        func detach() {
+        func unbind() {
+            prefillWorkItem?.cancel()
+            prefillWorkItem = nil
             observations.forEach { $0.invalidate() }
             observations.removeAll()
-            webView = nil
         }
 
-        private func onMain(_ work: @escaping @MainActor () -> Void) {
-            Task { @MainActor in
-                work()
-            }
-        }
-
-        private func sync(_ webView: WKWebView) {
+        private func publishNavigationState(from webView: WKWebView) {
             let canGoBack = webView.canGoBack
             let canGoForward = webView.canGoForward
             let currentURL = webView.url
             let isLoading = webView.isLoading
             let progress = webView.estimatedProgress
-            onMain { [self] in
-                self.model.canGoBack = canGoBack
-                self.model.canGoForward = canGoForward
-                self.model.currentURL = currentURL
-                self.model.isLoading = isLoading
-                self.model.progress = progress
+            DispatchQueue.main.async { [model] in
+                model.canGoBack = canGoBack
+                model.canGoForward = canGoForward
+                model.currentURL = currentURL
+                model.isLoading = isLoading
+                model.progress = progress
             }
+        }
+
+        private func schedulePrefill(for webView: WKWebView) {
+            prefillWorkItem?.cancel()
+            let work = DispatchWorkItem { [weak webView] in
+                guard let webView else { return }
+                BookingFormPrefill.inject(into: webView)
+            }
+            prefillWorkItem = work
+            // Let the SPA settle before touching the DOM.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: work)
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
             AppLog.log("WebView load \(webView.url?.absoluteString ?? "(nil)")")
-            sync(webView)
+            prefillWorkItem?.cancel()
+            publishNavigationState(from: webView)
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             AppLog.log("WebView finish \(webView.url?.absoluteString ?? "(nil)")")
-            sync(webView)
-            // Prefill must run on the main thread with a live web view.
-            Task { @MainActor [weak webView] in
-                guard let webView else { return }
-                BookingFormPrefill.inject(into: webView)
-                AppLog.log("Prefill inject ran")
-            }
+            publishNavigationState(from: webView)
+            schedulePrefill(for: webView)
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
             AppLog.log("WebView fail \(error.localizedDescription)")
-            sync(webView)
+            publishNavigationState(from: webView)
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
             AppLog.log("WebView provisional fail \(error.localizedDescription)")
-            sync(webView)
+            publishNavigationState(from: webView)
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            decisionHandler(.allow)
         }
 
         func webView(
@@ -207,7 +202,6 @@ struct WebViewRepresentable: UIViewRepresentable {
             for navigationAction: WKNavigationAction,
             windowFeatures: WKWindowFeatures
         ) -> WKWebView? {
-            // Open target=_blank links in the same web view.
             if navigationAction.targetFrame == nil, let url = navigationAction.request.url {
                 webView.load(URLRequest(url: url))
             }

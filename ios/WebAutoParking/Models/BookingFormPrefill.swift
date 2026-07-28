@@ -2,9 +2,40 @@ import Foundation
 import WebKit
 
 enum BookingFormPrefill {
+    /// Prefill only on checkout-like pages. Search/browse/home SPAs crash if we hammer the DOM.
+    static func shouldInject(for url: URL?) -> Bool {
+        guard let host = url?.host?.lowercased(),
+              let path = url?.path.lowercased()
+        else { return false }
+
+        let isParkingHost =
+            host.contains("parkmobile")
+            || host.contains("spothero")
+            || host.contains("parkme")
+        guard isParkingHost else { return false }
+
+        // Skip search / browse / zone entry SPAs — those crashed under DOM observers.
+        return path.contains("reservation")
+            || path.contains("purchase")
+            || path.contains("checkout")
+            || path.contains("payment")
+            || path.contains("/book")
+    }
+
     /// Applies `BookingConfig.json`: contact, vehicle, guest checkout, Apple Pay.
     static func inject(into webView: WKWebView, config: BookingConfig = .load()) {
-        webView.evaluateJavaScript(script(config: config), completionHandler: nil)
+        guard shouldInject(for: webView.url) else {
+            AppLog.log("Prefill skipped for \(webView.url?.absoluteString ?? "(nil)")")
+            return
+        }
+        AppLog.log("Prefill inject \(webView.url?.absoluteString ?? "(nil)")")
+        webView.evaluateJavaScript(script(config: config)) { _, error in
+            if let error {
+                AppLog.log("Prefill JS error: \(error.localizedDescription)")
+            } else {
+                AppLog.log("Prefill JS ok")
+            }
+        }
     }
 
     private static func script(config: BookingConfig) -> String {
@@ -18,13 +49,11 @@ enum BookingFormPrefill {
         let preferGuest = config.preferGuestCheckout ? "true" : "false"
         let payment = jsonString(config.prefersApplePay ? "applePay" : config.paymentMethod)
 
+        // Intentionally conservative: no continuous MutationObserver (that looped on SPAs and crashed WKWebView).
         return """
         (function() {
-          if (window.__parkingPrefillInstalled) {
-            window.__parkingPrefillRun && window.__parkingPrefillRun();
-            return;
-          }
-          window.__parkingPrefillInstalled = true;
+          if (window.__parkingPrefillBusy) return;
+          window.__parkingPrefillBusy = true;
 
           var cfg = {
             email: \(email),
@@ -41,34 +70,36 @@ enum BookingFormPrefill {
           function norm(s) { return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ''); }
           function visible(el) {
             if (!el) return false;
-            var style = window.getComputedStyle(el);
-            if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
-            var r = el.getBoundingClientRect();
-            return r.width > 0 && r.height > 0;
+            try {
+              var style = window.getComputedStyle(el);
+              if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+              var r = el.getBoundingClientRect();
+              return r.width > 0 && r.height > 0;
+            } catch (e) { return false; }
           }
           function click(el) {
             if (!el || !visible(el)) return false;
             try { el.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
-            el.click();
+            try { el.click(); } catch (e) {}
             return true;
           }
           function setNativeValue(el, value) {
             if (!el || value == null || value === '') return false;
             if (el.disabled || el.readOnly) return false;
             var tag = (el.tagName || '').toUpperCase();
-            if (tag === 'SELECT') {
-              return setSelectValue(el, value);
-            }
-            var proto = el instanceof HTMLTextAreaElement
-              ? HTMLTextAreaElement.prototype
-              : HTMLInputElement.prototype;
-            var setter = Object.getOwnPropertyDescriptor(proto, 'value');
-            if (setter && setter.set) setter.set.call(el, value);
-            else el.value = value;
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-            el.dispatchEvent(new Event('change', { bubbles: true }));
-            el.dispatchEvent(new Event('blur', { bubbles: true }));
-            return true;
+            if (tag === 'SELECT') return setSelectValue(el, value);
+            try {
+              var proto = el instanceof HTMLTextAreaElement
+                ? HTMLTextAreaElement.prototype
+                : HTMLInputElement.prototype;
+              var setter = Object.getOwnPropertyDescriptor(proto, 'value');
+              if (setter && setter.set) setter.set.call(el, value);
+              else el.value = value;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              el.dispatchEvent(new Event('blur', { bubbles: true }));
+              return true;
+            } catch (e) { return false; }
           }
           function setSelectValue(el, value) {
             var want = norm(value);
@@ -94,13 +125,10 @@ enum BookingFormPrefill {
             if (el.labels && el.labels.length) {
               t = Array.prototype.map.call(el.labels, function(l) { return l.textContent; }).join(' ');
             }
-            var aria = el.getAttribute('aria-label') || '';
-            var ph = el.placeholder || '';
-            var name = el.name || '';
-            var id = el.id || '';
-            var ac = el.autocomplete || '';
-            var alt = el.getAttribute('alt') || '';
-            return norm(t + ' ' + aria + ' ' + ph + ' ' + name + ' ' + id + ' ' + ac + ' ' + alt);
+            return norm(
+              t + ' ' + (el.getAttribute('aria-label') || '') + ' ' + (el.placeholder || '') + ' ' +
+              (el.name || '') + ' ' + (el.id || '') + ' ' + (el.autocomplete || '')
+            );
           }
           function classify(el) {
             var key = labelText(el);
@@ -119,11 +147,11 @@ enum BookingFormPrefill {
             return null;
           }
           function textOf(el) {
-            return norm((el.innerText || el.textContent || '') + ' ' + (el.getAttribute('aria-label') || '') + ' ' + (el.value || '') + ' ' + (el.getAttribute('alt') || ''));
+            return norm((el.innerText || el.textContent || '') + ' ' + (el.getAttribute('aria-label') || '') + ' ' + (el.value || ''));
           }
           function findByText(selectors, re) {
             var nodes = document.querySelectorAll(selectors);
-            for (var i = 0; i < nodes.length; i++) {
+            for (var i = 0; i < Math.min(nodes.length, 200); i++) {
               var el = nodes[i];
               if (!visible(el)) continue;
               if (re.test(textOf(el)) || re.test(labelText(el))) return el;
@@ -145,21 +173,17 @@ enum BookingFormPrefill {
             if (!cfg.preferGuestCheckout) return;
             var guestBtn = findByText(
               'button, a, [role=\"button\"], input[type=\"button\"], input[type=\"submit\"]',
-              /^(continueasguest|checkoutasguest|guestcheckout|continuewithout(an)?account|payasguest|bookasguest)$|continueasguest|checkoutasguest|guestcheckout|without(an)?account|payasguest/
+              /continueasguest|checkoutasguest|guestcheckout|without(an)?account|payasguest|bookasguest/
             );
             if (guestBtn) click(guestBtn);
           }
 
           function selectApplePay() {
             if (norm(cfg.paymentMethod) !== 'applepay') return;
-
             var appleBtn = document.querySelector(
               'apple-pay-button, button.apple-pay-button, .apple-pay-button, [aria-label*=\"Apple Pay\" i], [aria-label*=\"ApplePay\" i]'
             );
-            if (appleBtn && visible(appleBtn)) {
-              click(appleBtn);
-              return;
-            }
+            if (appleBtn && visible(appleBtn)) { click(appleBtn); return; }
 
             var radios = document.querySelectorAll('input[type=\"radio\"]');
             for (var i = 0; i < radios.length; i++) {
@@ -171,28 +195,13 @@ enum BookingFormPrefill {
                   r.dispatchEvent(new Event('input', { bubbles: true }));
                   r.dispatchEvent(new Event('change', { bubbles: true }));
                   click(r);
-                  if (r.labels && r.labels[0]) click(r.labels[0]);
                 }
                 return;
               }
             }
 
-            var payLabel = findByText('label, button, a, [role=\"button\"], [role=\"radio\"], div, span', /^applepay$|applepay/);
-            if (payLabel) {
-              var target = payLabel.closest('label, button, [role=\"button\"], [role=\"radio\"]') || payLabel;
-              click(target);
-              return;
-            }
-
-            var icons = document.querySelectorAll('img[alt*=\"Apple Pay\" i], img[src*=\"apple-pay\" i], img[src*=\"apple_pay\" i]');
-            for (var j = 0; j < icons.length; j++) {
-              var icon = icons[j];
-              var clickable = icon.closest('button, a, label, [role=\"button\"], [role=\"radio\"]');
-              if (clickable && visible(clickable)) {
-                click(clickable);
-                return;
-              }
-            }
+            var payLabel = findByText('label, button, a, [role=\"button\"], [role=\"radio\"]', /applepay/);
+            if (payLabel) click(payLabel.closest('label, button, [role=\"button\"], [role=\"radio\"]') || payLabel);
           }
 
           function fillFields() {
@@ -243,20 +252,20 @@ enum BookingFormPrefill {
           }
 
           function fillOnce() {
-            preferGuestCheckout();
-            fillFields();
-            selectApplePay();
+            try {
+              preferGuestCheckout();
+              fillFields();
+              selectApplePay();
+            } catch (e) {}
           }
 
-          window.__parkingPrefillRun = fillOnce;
           fillOnce();
-          var obs = new MutationObserver(function() { fillOnce(); });
-          if (document.documentElement) {
-            obs.observe(document.documentElement, { childList: true, subtree: true });
-          }
-          setTimeout(fillOnce, 400);
-          setTimeout(fillOnce, 1200);
-          setTimeout(fillOnce, 2500);
+          setTimeout(fillOnce, 600);
+          setTimeout(fillOnce, 1600);
+          setTimeout(function() {
+            fillOnce();
+            window.__parkingPrefillBusy = false;
+          }, 3200);
         })();
         """
     }
