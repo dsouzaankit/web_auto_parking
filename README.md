@@ -32,6 +32,7 @@ On checkout / login-to-checkout pages (not Find search), the WebView will:
 - SpotHero’s vehicle popup has **State or Province** only (no Country field).
 - **ParkMobile time quirk:** their checkout builder takes UTC clock hours then appends the local offset, so a real `09:45-04:00` becomes `13:45-04:00` (start jumps to the old end / 1:45 PM). We open `/checkout/reservation/…` directly with local wall times stamped as `Z` (e.g. `09:45:00Z`) so their UTC getters keep the ASAP hour. Do not switch back to naive/`-04:00` `startDate`+Reserve without retesting.
 - **Lincoln Harbor evening package:** [1525 Harbor Garage](https://app.parkmobile.io/reservation/62713) (`62713`) often rewrites evening ASAP/−15m/−30m 3–6h windows into a fixed **~5:30 PM → 12:30 AM (7h)** rate package. Z-stamped checkout still works (no UTC hour jump); Bisby keeps the requested window. This is ParkMobile’s rate packaging for that facility, not an app start-mode bug.
+- **ParkChirp Harbor:** same garage via [parkchirp.com/facilities/1525-harbor-blvd](https://parkchirp.com/facilities/1525-harbor-blvd/). Deep links use wall-clock stamped as UTC unix `startTime`/`endTime` (real EDT epochs show +4h). Pickers are **:00/:30** only (ASAP/−15m/−30m all snap to 30-minute marks). Automation **waits for account sign-in** and does not tap Checkout (saved-card charges have returned processor 500s in testing).
 
 `sessionDurationHours` may be `3`, `4`, `5`, or `6` (fixed-duration locked window). The Garages tab also has a **3h / 4h / 5h / 6h** control that overrides this at runtime.
 
@@ -47,9 +48,10 @@ Useful log lines: `Prefill inject`, `Prefill JS {"status":"advanced|filled|waiti
 
 | Provider | Example | URL shape |
 |----------|---------|-----------|
-| **Fixed duration** | [1525 Harbor Garage](https://app.parkmobile.io/reservation/62713) | `/reservation/{id}?startDate=…&endDate=…` (**3–6h** locked) |
+| **Fixed duration** | [1525 Harbor Garage](https://app.parkmobile.io/reservation/62713) | `/checkout/reservation/{id}?start_at=…Z&stop_at=…Z` (**3–6h** locked) |
 | **Fixed duration** | [(SP+) The Bisby Garage](https://app.parkmobile.io/reservation/59277) | same (vehicle plate required) |
 | **Flexible** | [29245 Mall Dr. E](https://spothero.com/purchase/hourly?facility=131895) | `/purchase/hourly?facility={id}&starts=…` (**no `ends`** — free extra time kept) |
+| **ParkChirp** | [1525 Harbor Blvd](https://parkchirp.com/facilities/1525-harbor-blvd/?checkout=true&type=hourly) | `/facilities/{slug}/?checkout=true&type=hourly&startTime=…&endTime=…` (unix wall-as-UTC; **:00/:30** only; **sign-in required**) |
 
 Presets above are saved by default (existing installs pick up missing ones on next launch).
 

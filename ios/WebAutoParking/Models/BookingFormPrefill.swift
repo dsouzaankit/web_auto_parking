@@ -31,6 +31,7 @@ enum BookingFormPrefill {
             host.contains("parkmobile")
             || host.contains("spothero")
             || host.contains("parkme")
+            || host.contains("parkchirp")
         guard isParkingHost else { return false }
 
         let path = url.path.lowercased()
@@ -42,6 +43,7 @@ enum BookingFormPrefill {
             || haystack.contains("checkout")
             || haystack.contains("payment")
             || haystack.contains("/book")
+            || haystack.contains("facilities")
             || path.contains("login")
             || path.contains("signin")
             || path.contains("sign-in")
@@ -799,7 +801,7 @@ enum BookingFormPrefill {
           }
 
           function paymentSectionNeedsAction() {
-            // ParkMobile only — SpotHero payment left alone.
+            // ParkMobile only — SpotHero / ParkChirp payment left alone.
             var onPM = /parkmobile\\.io/i.test(location.hostname || '');
             if (!onPM) return false;
             if (wantsApplePay() && findContinueWithApplePayButton()) return true;
@@ -807,13 +809,146 @@ enum BookingFormPrefill {
             return false;
           }
 
+          function isParkChirp() {
+            return /parkchirp\\.com/i.test(location.hostname || '');
+          }
+
+          function parkChirpIsSignedIn() {
+            var t = (document.body && document.body.innerText) || '';
+            if (/you are logged in as/i.test(t)) return true;
+            if (/log\\s*out\\?/i.test(t)) return true;
+            return false;
+          }
+
+          function parkChirpNeedsSignIn() {
+            if (!isParkChirp()) return false;
+            if (parkChirpIsSignedIn()) return false;
+            var t = (document.body && document.body.innerText) || '';
+            if (/you need to log in or create an account/i.test(t)) return true;
+            if (document.querySelector('input[type=\"password\"]')) return true;
+            // Checkout shell visible but session not confirmed yet.
+            if (document.querySelector('#gpi-checkout-submit')) return true;
+            return false;
+          }
+
+          function parkChirpLoginFieldsFilled() {
+            var pass = null;
+            var passes = document.querySelectorAll('input[type=\"password\"]');
+            for (var i = 0; i < passes.length; i++) {
+              if (visible(passes[i]) && (passes[i].value || '').length > 0) {
+                pass = passes[i];
+                break;
+              }
+            }
+            if (!pass) return null;
+            var email = null;
+            var root = pass.form || pass.closest('form') || pass.parentElement;
+            var inputs = (root || document).querySelectorAll('input[type=\"email\"], input[type=\"text\"], input:not([type])');
+            for (var j = 0; j < inputs.length; j++) {
+              var el = inputs[j];
+              if (!visible(el)) continue;
+              var key = classify(el);
+              var looksEmail = key === 'email' || /email/i.test(el.name || '') || /email/i.test(el.id || '')
+                || /email/i.test(el.placeholder || '');
+              if (looksEmail && (el.value || '').indexOf('@') !== -1) {
+                email = el;
+                break;
+              }
+            }
+            if (!email) return null;
+            return { email: email, password: pass, form: pass.form || null };
+          }
+
+          function findParkChirpLoginSubmit(fields) {
+            if (!fields) return null;
+            var scope = fields.form || (fields.password && fields.password.closest('form')) || document;
+            var buttons = scope.querySelectorAll('button, input[type=\"submit\"]');
+            for (var i = 0; i < buttons.length; i++) {
+              var b = buttons[i];
+              if (!visible(b)) continue;
+              var label = norm(b.innerText || b.value || '');
+              // Login Submit — skip Create Account / Checkout / Apply.
+              if (label === 'submit' || label === 'loginsubmit' || label === 'login' || label === 'signin') {
+                if (/checkout|apply|create|register|subscribe/i.test(label)) continue;
+                return b;
+              }
+            }
+            // Fallback: submit nearest password field's form.
+            if (fields.form) {
+              var fallback = fields.form.querySelector('button[type=\"submit\"], input[type=\"submit\"], button');
+              if (fallback && visible(fallback)) {
+                var fl = norm(fallback.innerText || fallback.value || '');
+                if (!/checkout|apply|create|register|subscribe/i.test(fl)) return fallback;
+              }
+            }
+            return null;
+          }
+
+          /// After iOS/Apple Password AutoFill fills email+password, tap Login Submit once.
+          function submitParkChirpLoginIfAutofilled() {
+            if (!isParkChirp() || parkChirpIsSignedIn()) return false;
+            if (window.__parkingParkChirpLoginAt && (Date.now() - window.__parkingParkChirpLoginAt) < 8000) {
+              return false;
+            }
+            var fields = parkChirpLoginFieldsFilled();
+            if (!fields) return false;
+            var btn = findParkChirpLoginSubmit(fields);
+            if (!btn) return false;
+            if (click(btn)) {
+              window.__parkingParkChirpLoginAt = Date.now();
+              return true;
+            }
+            return false;
+          }
+
+          // ParkChirp: wait for account sign-in; never guest, never tap Checkout.
+          function advanceParkChirp() {
+            if (!isParkChirp()) return null;
+            if (dismissCookieBanner()) {
+              return { status: 'advanced', filled: 0, action: 'cookie' };
+            }
+            if (submitParkChirpLoginIfAutofilled()) {
+              return { status: 'advanced', filled: 0, action: 'loginSubmit' };
+            }
+            if (parkChirpNeedsSignIn()) {
+              return { status: 'waiting', filled: 0, action: 'awaitSignIn' };
+            }
+            if (!parkChirpIsSignedIn()) {
+              return { status: 'waiting', filled: 0, action: 'awaitSignIn' };
+            }
+            var filled = 0;
+            // Prefer configured plate when several radios exist.
+            if (cfg.licensePlateNumber) {
+              var want = norm(cfg.licensePlateNumber);
+              var plates = document.querySelectorAll('input[type=\"radio\"][name=\"license-plates\"]');
+              for (var i = 0; i < plates.length; i++) {
+                var p = plates[i];
+                var label = norm((p.id || '') + ' ' + (p.value || '') + ' ' + ((p.labels && p.labels[0] && p.labels[0].innerText) || ''));
+                if (want && label.indexOf(want) !== -1 && !p.checked) {
+                  try {
+                    p.click();
+                    filled += 1;
+                  } catch (e) {}
+                  break;
+                }
+              }
+            }
+            // Ready for the user to tap Checkout (payment left to them).
+            if (document.querySelector('#gpi-checkout-submit')) {
+              return { status: 'filled', filled: filled, action: 'awaitCheckout' };
+            }
+            return { status: 'waiting', filled: filled, action: 'parkChirpMount' };
+          }
+
           function fillOnce() {
             try {
               if (hasBlockingCaptcha()) return { status: 'captcha', filled: 0, action: 'captcha' };
+              var parkChirpStep = advanceParkChirp();
+              if (parkChirpStep) return parkChirpStep;
               var action = null;
               if (dismissCookieBanner()) action = 'cookie';
               if (clickReserveParkHere()) action = action || 'reserve';
-              if (preferGuestCheckout()) action = action || 'guest';
+              if (!isParkChirp() && preferGuestCheckout()) action = action || 'guest';
               var filled = fillFields();
               filled += fillSpotHeroVehicleModal();
               // SpotHero: open vehicle modal, then confirm after make/model selection.

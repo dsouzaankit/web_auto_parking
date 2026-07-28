@@ -23,10 +23,9 @@ struct AddGarageView: View {
                         Text(item.displayName).tag(item)
                     }
                 }
-                .pickerStyle(.segmented)
 
                 TextField(provider.idLabel, text: $facilityID)
-                    .keyboardType(.numberPad)
+                    .keyboardType(provider == .parkChirp ? .default : .numberPad)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
 
@@ -44,6 +43,9 @@ struct AddGarageView: View {
             Section("Presets") {
                 Button("1525 Harbor Garage") {
                     apply(Garage.harborWeehawken)
+                }
+                Button("1525 Harbor (ParkChirp)") {
+                    apply(Garage.harborParkChirp)
                 }
                 Button("The Bisby Garage") {
                     apply(Garage.bisbyJerseyCity)

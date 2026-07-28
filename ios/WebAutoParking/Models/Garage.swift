@@ -4,11 +4,13 @@ enum ParkingProvider: String, Codable, CaseIterable, Hashable {
     /// Raw values kept for existing UserDefaults garage saves.
     case fixedDuration = "parkMobile"
     case flexibleDuration = "spotHero"
+    case parkChirp = "parkChirp"
 
     var displayName: String {
         switch self {
         case .fixedDuration: return "Fixed duration"
         case .flexibleDuration: return "Flexible"
+        case .parkChirp: return "ParkChirp"
         }
     }
 
@@ -16,6 +18,7 @@ enum ParkingProvider: String, Codable, CaseIterable, Hashable {
         switch self {
         case .fixedDuration: return "Reservation ID"
         case .flexibleDuration: return "Facility ID"
+        case .parkChirp: return "Facility slug"
         }
     }
 
@@ -25,13 +28,15 @@ enum ParkingProvider: String, Codable, CaseIterable, Hashable {
             return "From …/reservation/62713 → 62713"
         case .flexibleDuration:
             return "From …/purchase/hourly?facility=131895 → 131895"
+        case .parkChirp:
+            return "From …/facilities/1525-harbor-blvd/ → 1525-harbor-blvd"
         }
     }
 
     /// When false, only the start (next 15-min mark) is set — the site may extend free time / pick a rate package.
     var locksFixedDuration: Bool {
         switch self {
-        case .fixedDuration: return true
+        case .fixedDuration, .parkChirp: return true
         case .flexibleDuration: return false
         }
     }
@@ -56,9 +61,9 @@ struct Garage: Identifiable, Codable, Equatable, Hashable {
         durationHours: Int = 4,
         startMode: ReservationStartMode = .last15
     ) -> URL {
-        let start = SessionWindow.startDate(mode: startMode, from: date, calendar: calendar)
         switch provider {
         case .fixedDuration:
+            let start = SessionWindow.startDate(mode: startMode, from: date, calendar: calendar)
             let hours = BookingConfig.clampDuration(durationHours)
             let end = calendar.date(byAdding: .hour, value: hours, to: start) ?? start
             return FixedDurationURLs.checkout(
@@ -68,10 +73,25 @@ struct Garage: Identifiable, Codable, Equatable, Hashable {
                 calendar: calendar
             )
         case .flexibleDuration:
+            let start = SessionWindow.startDate(mode: startMode, from: date, calendar: calendar)
             return FlexibleDurationURLs.hourlyPurchase(
                 facilityID: facilityID,
                 start: start,
                 end: nil,
+                calendar: calendar
+            )
+        case .parkChirp:
+            let start = SessionWindow.startDateParkChirp(
+                mode: startMode,
+                from: date,
+                calendar: calendar
+            )
+            let hours = BookingConfig.clampDuration(durationHours)
+            let end = calendar.date(byAdding: .hour, value: hours, to: start) ?? start
+            return ParkChirpURLs.hourlyCheckout(
+                facilitySlug: facilityID,
+                start: start,
+                end: end,
                 calendar: calendar
             )
         }
@@ -99,6 +119,15 @@ struct Garage: Identifiable, Codable, Equatable, Hashable {
         name: "29245 Mall Dr. E - Lot",
         address: "29245 Mall Drive East, Jersey City, NJ",
         notes: "Outdoor self-park. Duration follows the rate package — free extra time is kept, not forced to 4h."
+    )
+
+    /// Same garage as ParkMobile Harbor, via ParkChirp (requires account sign-in).
+    static let harborParkChirp = Garage(
+        facilityID: "1525-harbor-blvd",
+        provider: .parkChirp,
+        name: "1525 Harbor Blvd (ParkChirp)",
+        address: "1525 Harbor Boulevard, Weehawken Township, NJ 07086",
+        notes: "Sign in on ParkChirp, then Checkout. Pull ticket; exit via intercom with Propark reservation. Times snap to :00/:30."
     )
 
     enum CodingKeys: String, CodingKey {
@@ -210,6 +239,37 @@ enum FlexibleDurationURLs {
             items.append(URLQueryItem(name: "ends", value: SessionWindow.isoLocalDateString(end, calendar: calendar)))
         }
         components.queryItems = items
+        return components.url!
+    }
+}
+
+enum ParkChirpURLs {
+    static let home = URL(string: "https://parkchirp.com/")!
+
+    /// Hourly checkout deep link. `facilitySlug` is the path segment (e.g. `1525-harbor-blvd`).
+    /// Uses wall-clock stamped as UTC unix seconds so the GUI keeps Eastern hours.
+    static func hourlyCheckout(
+        facilitySlug: String,
+        start: Date,
+        end: Date,
+        calendar: Calendar = .current
+    ) -> URL {
+        let slug = facilitySlug
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        var components = URLComponents(string: "https://parkchirp.com/facilities/\(slug)/")!
+        components.queryItems = [
+            URLQueryItem(name: "checkout", value: "true"),
+            URLQueryItem(name: "type", value: "hourly"),
+            URLQueryItem(
+                name: "startTime",
+                value: String(SessionWindow.unixParkChirpWallSeconds(start, calendar: calendar))
+            ),
+            URLQueryItem(
+                name: "endTime",
+                value: String(SessionWindow.unixParkChirpWallSeconds(end, calendar: calendar))
+            )
+        ]
         return components.url!
     }
 }

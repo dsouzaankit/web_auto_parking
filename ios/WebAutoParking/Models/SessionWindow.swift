@@ -138,6 +138,40 @@ enum SessionWindow {
         return formatter.string(from: date)
     }
 
+    /// Local wall clock stamped as a UTC unix timestamp (ParkChirp deep links).
+    /// Same class of quirk as ParkMobile Z-stamp: real EDT epochs display +4h on their GUI.
+    static func unixParkChirpWallSeconds(_ date: Date, calendar: Calendar = .current) -> Int {
+        let comps = calendar.dateComponents(
+            [.year, .month, .day, .hour, .minute],
+            from: date
+        )
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(secondsFromGMT: 0)!
+        let stamped = utc.date(from: DateComponents(
+            year: comps.year,
+            month: comps.month,
+            day: comps.day,
+            hour: comps.hour,
+            minute: comps.minute,
+            second: 0
+        )) ?? date
+        return Int(stamped.timeIntervalSince1970)
+    }
+
+    /// ParkChirp time pickers are :00 / :30 only.
+    static func startDateParkChirp(
+        mode: ReservationStartMode,
+        from date: Date = .now,
+        calendar: Calendar = .current
+    ) -> Date {
+        switch mode {
+        case .asap:
+            return nextMinuteMark(atOrAfter: date, interval: 30, calendar: calendar)
+        case .last15, .last30:
+            return previousMinuteMark(atOrBefore: date, interval: 30, calendar: calendar)
+        }
+    }
+
     static func displayRange(
         from date: Date = .now,
         calendar: Calendar = .current,
