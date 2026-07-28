@@ -16,8 +16,10 @@ struct GarageListView: View {
         List {
             Section {
                 Picker("Fixed duration", selection: $sessionPrefs.durationHours) {
-                    Text("3 hours").tag(3)
-                    Text("4 hours").tag(4)
+                    Text("3h").tag(3)
+                    Text("4h").tag(4)
+                    Text("5h").tag(5)
+                    Text("6h").tag(6)
                 }
                 .pickerStyle(.segmented)
 

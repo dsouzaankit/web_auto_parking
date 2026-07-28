@@ -49,7 +49,7 @@ struct Garage: Identifiable, Codable, Equatable, Hashable {
     var id: String { "\(provider.rawValue):\(facilityID)" }
 
     /// Opens checkout starting at the **next 15-minute mark**.
-    /// Fixed-duration providers lock end to the global 3h/4h setting; flexible ones leave duration to the rate package.
+    /// Fixed-duration providers lock end to the global 3–6h setting; flexible ones leave duration to the rate package.
     func reservationURL(
         from date: Date = .now,
         calendar: Calendar = .current,

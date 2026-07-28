@@ -32,7 +32,7 @@ On checkout / login-to-checkout pages (not Find search), the WebView will:
 - SpotHero’s vehicle popup has **State or Province** only (no Country field).
 - **ParkMobile time quirk:** their checkout builder takes UTC clock hours then appends the local offset, so a real `09:45-04:00` becomes `13:45-04:00` (start jumps to the old end / 1:45 PM). We open `/checkout/reservation/…` directly with local wall times stamped as `Z` (e.g. `09:45:00Z`) so their UTC getters keep the ASAP hour. Do not switch back to naive/`-04:00` `startDate`+Reserve without retesting.
 
-`sessionDurationHours` may be `3` or `4` (fixed-duration locked window). The Garages tab also has a **3 hours / 4 hours** control that overrides this at runtime.
+`sessionDurationHours` may be `3`, `4`, `5`, or `6` (fixed-duration locked window). The Garages tab also has a **3h / 4h / 5h / 6h** control that overrides this at runtime.
 
 ## LAN logs (Wi‑Fi)
 
@@ -46,7 +46,7 @@ Useful log lines: `Prefill inject`, `Prefill JS {"status":"advanced|filled|waiti
 
 | Provider | Example | URL shape |
 |----------|---------|-----------|
-| **Fixed duration** | [1525 Harbor Garage](https://app.parkmobile.io/reservation/62713) | `/reservation/{id}?startDate=…&endDate=…` (**3h or 4h** locked) |
+| **Fixed duration** | [1525 Harbor Garage](https://app.parkmobile.io/reservation/62713) | `/reservation/{id}?startDate=…&endDate=…` (**3–6h** locked) |
 | **Fixed duration** | [(SP+) The Bisby Garage](https://app.parkmobile.io/reservation/59277) | same (vehicle plate required) |
 | **Flexible** | [29245 Mall Dr. E](https://spothero.com/purchase/hourly?facility=131895) | `/purchase/hourly?facility={id}&starts=…` (**no `ends`** — free extra time kept) |
 
@@ -57,7 +57,7 @@ Presets above are saved by default (existing installs pick up missing ones on ne
 | Setting | Fixed duration | Flexible |
 |---------|----------------|----------|
 | **Start** | Next **15-minute** mark | Same |
-| **Duration** | Global **3h or 4h** (config + in-app toggle) | Not forced — checkout may add **free extra time** |
+| **Duration** | Global **3–6h** (config + in-app toggle) | Not forced — checkout may add **free extra time** |
 | **End** | Start + duration | Omitted so the rate package can extend |
 
 ## Tabs

@@ -4,7 +4,7 @@ enum SessionWindow {
     /// Checkout start/end pickers snap to this many minutes.
     static let snapMinutes = 15
 
-    /// Active global duration (3 or 4), from in-app preference / config.
+    /// Active global duration (3–6), from in-app preference / config.
     @MainActor
     static var durationHours: Int {
         SessionPreferences.shared.durationHours
