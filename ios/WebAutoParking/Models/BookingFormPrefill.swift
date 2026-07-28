@@ -252,8 +252,29 @@ enum BookingFormPrefill {
           var latest = first;
           setTimeout(function() { latest = fillOnce(); }, 600);
           setTimeout(function() { latest = fillOnce(); }, 1600);
+
+          // If captcha blocks the first pass, keep retrying until it clears.
+          var attempts = 0;
+          var maxAttempts = 60; // ~2 minutes at 2s
+          var retryTimer = setInterval(function() {
+            attempts += 1;
+            if (window.__parkingPrefillBusy !== true) {
+              clearInterval(retryTimer);
+              return;
+            }
+            latest = fillOnce();
+            if (latest.status === 'filled') {
+              clearInterval(retryTimer);
+              window.__parkingPrefillBusy = false;
+            } else if (attempts >= maxAttempts) {
+              clearInterval(retryTimer);
+              window.__parkingPrefillBusy = false;
+            }
+          }, 2000);
+
           setTimeout(function() {
             latest = fillOnce();
+            clearInterval(retryTimer);
             window.__parkingPrefillBusy = false;
             try {
               return JSON.stringify(latest);

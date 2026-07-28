@@ -86,14 +86,16 @@ private struct WebBrandOption: Identifiable, Hashable {
     let webViewTitle: String
     let url: URL
 
+    private static let spotHeroSearch = URL(string: "https://spothero.com/search")!
+
     static let findBrands: [WebBrandOption] = [
         .init(id: "parkmobile-search", label: "ParkMobile", webViewTitle: "ParkMobile", url: FixedDurationURLs.search),
-        .init(id: "spothero-home", label: "SpotHero", webViewTitle: "SpotHero", url: FlexibleDurationURLs.home)
+        .init(id: "spothero-search", label: "SpotHero", webViewTitle: "SpotHero", url: spotHeroSearch)
     ]
 
     static let browseBrands: [WebBrandOption] = [
-        .init(id: "parkmobile-home", label: "ParkMobile", webViewTitle: "ParkMobile", url: FixedDurationURLs.home),
-        .init(id: "spothero-home", label: "SpotHero", webViewTitle: "SpotHero", url: FlexibleDurationURLs.home)
+        .init(id: "parkmobile-search", label: "ParkMobile", webViewTitle: "ParkMobile", url: FixedDurationURLs.search),
+        .init(id: "spothero-search", label: "SpotHero", webViewTitle: "SpotHero", url: spotHeroSearch)
     ]
 }
 
