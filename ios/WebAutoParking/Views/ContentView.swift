@@ -93,9 +93,10 @@ private struct WebBrandOption: Identifiable, Hashable {
         .init(id: "spothero-search", label: "SpotHero", webViewTitle: "SpotHero", url: spotHeroSearch)
     ]
 
+    /// Browse defaults to SpotHero so Find/Browse are not identical on first open.
     static let browseBrands: [WebBrandOption] = [
-        .init(id: "parkmobile-search", label: "ParkMobile", webViewTitle: "ParkMobile", url: FixedDurationURLs.search),
-        .init(id: "spothero-search", label: "SpotHero", webViewTitle: "SpotHero", url: spotHeroSearch)
+        .init(id: "spothero-search", label: "SpotHero", webViewTitle: "SpotHero", url: spotHeroSearch),
+        .init(id: "parkmobile-search", label: "ParkMobile", webViewTitle: "ParkMobile", url: FixedDurationURLs.search)
     ]
 }
 

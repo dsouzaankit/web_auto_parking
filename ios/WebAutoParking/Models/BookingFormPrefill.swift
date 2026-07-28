@@ -19,11 +19,11 @@ enum BookingFormPrefill {
         case unknown
     }
 
-    /// Prefill only on checkout-like pages.
+    /// Prefill on checkout / login-to-checkout pages (ParkMobile often redirects reservation → login).
     static func shouldInject(for url: URL?, trigger: Trigger) -> Bool {
         guard trigger == .manual || autoInjectEnabled else { return false }
-        guard let host = url?.host?.lowercased(),
-              let path = url?.path.lowercased()
+        guard let url,
+              let host = url.host?.lowercased()
         else { return false }
 
         let isParkingHost =
@@ -32,11 +32,20 @@ enum BookingFormPrefill {
             || host.contains("parkme")
         guard isParkingHost else { return false }
 
-        return path.contains("reservation")
-            || path.contains("purchase")
-            || path.contains("checkout")
-            || path.contains("payment")
-            || path.contains("/book")
+        let path = url.path.lowercased()
+        let query = (url.query ?? "").lowercased()
+        let haystack = path + "?" + query
+
+        return haystack.contains("reservation")
+            || haystack.contains("purchase")
+            || haystack.contains("checkout")
+            || haystack.contains("payment")
+            || haystack.contains("/book")
+            || path.contains("login")
+            || path.contains("signin")
+            || path.contains("sign-in")
+            || path.contains("guest")
+            || path.contains("account")
     }
 
     /// Applies `BookingConfig.json` field values into visible form inputs.
@@ -271,11 +280,24 @@ enum BookingFormPrefill {
             return filled;
           }
 
+          function preferGuestCheckout() {
+            if (!cfg.preferGuestCheckout) return false;
+            var guestBtn = findByText(
+              'button, a, [role=\"button\"], input[type=\"button\"], input[type=\"submit\"]',
+              /continueasguest|checkoutasguest|guestcheckout|without(an)?account|payasguest|bookasguest|guest/
+            );
+            if (guestBtn) return click(guestBtn);
+            return false;
+          }
+
           function fillOnce() {
             try {
               if (hasBlockingCaptcha()) return { status: 'captcha', filled: 0 };
+              var guest = preferGuestCheckout();
               var filled = fillFields();
               if (filled > 0) return { status: 'filled', filled: filled };
+              // Guest click or SPA still mounting — keep retrying.
+              if (guest) return { status: 'waiting', filled: 0 };
               return { status: 'waiting', filled: 0 };
             } catch (e) {}
             return { status: 'error', filled: 0 };

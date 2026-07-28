@@ -130,6 +130,7 @@ struct WebViewRepresentable: UIViewRepresentable {
         private var lastPublishedProgress: Double = -1
         private var prefillWorkItem: DispatchWorkItem?
         private var autoPrefillAttempts = 0
+        private var lastPrefillURL: String?
 
         init(model: WebViewModel) {
             self.model = model
@@ -137,12 +138,26 @@ struct WebViewRepresentable: UIViewRepresentable {
 
         func bind(_ webView: WKWebView) {
             unbind()
-            // Progress only, throttled — navigation flags come from delegate callbacks.
+            // Progress + URL — ParkMobile SPA often changes URL without a full reload.
             observations = [
                 webView.observe(\.estimatedProgress, options: [.new]) { [weak self] view, _ in
                     let progress = view.estimatedProgress
                     DispatchQueue.main.async {
                         self?.publishProgress(progress)
+                    }
+                },
+                webView.observe(\.url, options: [.new]) { [weak self] view, _ in
+                    let url = view.url
+                    DispatchQueue.main.async {
+                        guard let self else { return }
+                        self.model.currentURL = url
+                        let key = url?.absoluteString
+                        guard let key, key != self.lastPrefillURL else { return }
+                        guard BookingFormPrefill.shouldInject(for: url, trigger: .auto) else { return }
+                        // Ignore transient same-host noise; only restart when path/query meaningfully changes.
+                        AppLog.log("WebView URL changed \(key)")
+                        self.lastPrefillURL = key
+                        self.scheduleAutoPrefill(for: view)
                     }
                 }
             ]
@@ -152,6 +167,7 @@ struct WebViewRepresentable: UIViewRepresentable {
             prefillWorkItem?.cancel()
             prefillWorkItem = nil
             autoPrefillAttempts = 0
+            lastPrefillURL = nil
             observations.forEach { $0.invalidate() }
             observations.removeAll()
         }
@@ -159,6 +175,7 @@ struct WebViewRepresentable: UIViewRepresentable {
         private func scheduleAutoPrefill(for webView: WKWebView) {
             prefillWorkItem?.cancel()
             autoPrefillAttempts = 0
+            lastPrefillURL = webView.url?.absoluteString
             enqueueAutoPrefill(for: webView, delay: 0.8)
         }
 
@@ -171,7 +188,10 @@ struct WebViewRepresentable: UIViewRepresentable {
                     DispatchQueue.main.async {
                         let shouldRetry: Bool
                         switch outcome {
-                        case .filled, .skipped, .error:
+                        case .filled, .error:
+                            shouldRetry = false
+                        case .skipped:
+                            // Search pages stay skipped; login/checkout URL changes restart via KVO.
                             shouldRetry = false
                         case .captcha, .waiting, .unknown:
                             shouldRetry = self.autoPrefillAttempts < 40
