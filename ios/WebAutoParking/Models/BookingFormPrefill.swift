@@ -2,8 +2,14 @@ import Foundation
 import WebKit
 
 enum BookingFormPrefill {
-    /// Prefill only on checkout-like pages. Search/browse/home SPAs crash if we hammer the DOM.
+    /// Off by default. ParkMobile/SpotHero SPAs crash the WKWebView (and app) when we
+    /// inject DOM fills / click guest / Apple Pay from `evaluateJavaScript`.
+    /// Keep the script for a future opt-in toolbar action after browse is stable.
+    static var isEnabled = false
+
+    /// Prefill only on checkout-like pages when re-enabled.
     static func shouldInject(for url: URL?) -> Bool {
+        guard isEnabled else { return false }
         guard let host = url?.host?.lowercased(),
               let path = url?.path.lowercased()
         else { return false }
@@ -14,7 +20,6 @@ enum BookingFormPrefill {
             || host.contains("parkme")
         guard isParkingHost else { return false }
 
-        // Skip search / browse / zone entry SPAs — those crashed under DOM observers.
         return path.contains("reservation")
             || path.contains("purchase")
             || path.contains("checkout")

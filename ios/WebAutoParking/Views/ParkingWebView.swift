@@ -16,6 +16,7 @@ struct ParkingWebView: View {
                 .animation(.easeOut(duration: 0.15), value: model.isLoading)
                 .frame(height: 2)
 
+            // Pass model without @ObservedObject so KVO/nav updates do not recreate the UIView.
             WebViewRepresentable(url: url, model: model)
                 .ignoresSafeArea(edges: .bottom)
         }
@@ -70,7 +71,7 @@ final class WebViewModel: ObservableObject {
 
 struct WebViewRepresentable: UIViewRepresentable {
     let url: URL
-    @ObservedObject var model: WebViewModel
+    let model: WebViewModel
 
     func makeCoordinator() -> Coordinator {
         Coordinator(model: model)
@@ -84,6 +85,8 @@ struct WebViewRepresentable: UIViewRepresentable {
         config.defaultWebpagePreferences = preferences
         config.websiteDataStore = .default()
         config.allowsInlineMediaPlayback = true
+        // Isolate from other WebViews so one bad page cannot take down every tab.
+        config.processPool = WKProcessPool()
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
@@ -113,7 +116,7 @@ struct WebViewRepresentable: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         private let model: WebViewModel
         private var observations: [NSKeyValueObservation] = []
-        private var prefillWorkItem: DispatchWorkItem?
+        private var lastPublishedProgress: Double = -1
 
         init(model: WebViewModel) {
             self.model = model
@@ -121,23 +124,30 @@ struct WebViewRepresentable: UIViewRepresentable {
 
         func bind(_ webView: WKWebView) {
             unbind()
-            // Only progress KVO — navigation flags come from delegate callbacks to avoid SwiftUI thrash.
+            // Progress only, throttled — navigation flags come from delegate callbacks.
             observations = [
                 webView.observe(\.estimatedProgress, options: [.new]) { [weak self] view, _ in
                     let progress = view.estimatedProgress
                     DispatchQueue.main.async {
-                        self?.model.progress = progress
-                        self?.model.isLoading = progress > 0 && progress < 1
+                        self?.publishProgress(progress)
                     }
                 }
             ]
         }
 
         func unbind() {
-            prefillWorkItem?.cancel()
-            prefillWorkItem = nil
             observations.forEach { $0.invalidate() }
             observations.removeAll()
+        }
+
+        private func publishProgress(_ progress: Double) {
+            // Skip tiny KVO chatter that forces SwiftUI body rebuilds.
+            if abs(progress - lastPublishedProgress) < 0.04, progress < 1, lastPublishedProgress >= 0 {
+                return
+            }
+            lastPublishedProgress = progress
+            model.progress = progress
+            model.isLoading = progress > 0 && progress < 1
         }
 
         private func publishNavigationState(from webView: WKWebView) {
@@ -155,27 +165,15 @@ struct WebViewRepresentable: UIViewRepresentable {
             }
         }
 
-        private func schedulePrefill(for webView: WKWebView) {
-            prefillWorkItem?.cancel()
-            let work = DispatchWorkItem { [weak webView] in
-                guard let webView else { return }
-                BookingFormPrefill.inject(into: webView)
-            }
-            prefillWorkItem = work
-            // Let the SPA settle before touching the DOM.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: work)
-        }
-
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
             AppLog.log("WebView load \(webView.url?.absoluteString ?? "(nil)")")
-            prefillWorkItem?.cancel()
             publishNavigationState(from: webView)
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             AppLog.log("WebView finish \(webView.url?.absoluteString ?? "(nil)")")
             publishNavigationState(from: webView)
-            schedulePrefill(for: webView)
+            // Prefill intentionally not run here — DOM injection crashes ParkMobile WKWebView.
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -186,6 +184,11 @@ struct WebViewRepresentable: UIViewRepresentable {
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
             AppLog.log("WebView provisional fail \(error.localizedDescription)")
             publishNavigationState(from: webView)
+        }
+
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            AppLog.log("WebView content process terminated — reloading")
+            webView.reload()
         }
 
         func webView(
