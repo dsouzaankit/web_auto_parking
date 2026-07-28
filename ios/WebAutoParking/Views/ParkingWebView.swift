@@ -166,12 +166,12 @@ struct WebViewRepresentable: UIViewRepresentable {
             let currentURL = webView.url
             let isLoading = webView.isLoading
             let progress = webView.estimatedProgress
-            onMain {
-                model.canGoBack = canGoBack
-                model.canGoForward = canGoForward
-                model.currentURL = currentURL
-                model.isLoading = isLoading
-                model.progress = progress
+            onMain { [self] in
+                self.model.canGoBack = canGoBack
+                self.model.canGoForward = canGoForward
+                self.model.currentURL = currentURL
+                self.model.isLoading = isLoading
+                self.model.progress = progress
             }
         }
 
