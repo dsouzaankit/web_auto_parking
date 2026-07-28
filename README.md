@@ -31,6 +31,7 @@ On checkout / login-to-checkout pages (not Find search), the WebView will:
 - Visible captcha challenges pause fill (badge-only reCAPTCHA is ignored).
 - SpotHero’s vehicle popup has **State or Province** only (no Country field).
 - **ParkMobile time quirk:** their checkout builder takes UTC clock hours then appends the local offset, so a real `09:45-04:00` becomes `13:45-04:00` (start jumps to the old end / 1:45 PM). We open `/checkout/reservation/…` directly with local wall times stamped as `Z` (e.g. `09:45:00Z`) so their UTC getters keep the ASAP hour. Do not switch back to naive/`-04:00` `startDate`+Reserve without retesting.
+- **Lincoln Harbor evening package:** [1525 Harbor Garage](https://app.parkmobile.io/reservation/62713) (`62713`) often rewrites evening ASAP/−15m/−30m 3–6h windows into a fixed **~5:30 PM → 12:30 AM (7h)** rate package. Z-stamped checkout still works (no UTC hour jump); Bisby keeps the requested window. This is ParkMobile’s rate packaging for that facility, not an app start-mode bug.
 
 `sessionDurationHours` may be `3`, `4`, `5`, or `6` (fixed-duration locked window). The Garages tab also has a **3h / 4h / 5h / 6h** control that overrides this at runtime.
 
