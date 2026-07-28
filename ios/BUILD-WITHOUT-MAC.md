@@ -6,7 +6,14 @@ Same approach as [`ios_3d_loop_segments`](../../ios_3d_loop_segments/ios/BUILD-W
 
 1. Push this repo to GitHub.
 2. **Actions** → **ios-build** → **Run workflow**.
-3. Download artifact **`WebAutoParking-ipa`** → `WebAutoParking.ipa`.
+3. Download artifact **`WebAutoParking-ipa`** → `ios/build artifacts/ipa/WebAutoParking.ipa`.
+4. Optional: copy to iCloud for the phone:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy.ps1
+```
+
+That places `WebAutoParking.ipa` in `%USERPROFILE%\iCloudDrive\Downloads` (or `C:\Users\dsouzaankit\iCloudDrive\Downloads` when present).
 
 Optional signed builds: set secrets `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`. Without them the IPA is unsigned and AltStore re-signs with your Apple ID.
 

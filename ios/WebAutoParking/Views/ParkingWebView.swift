@@ -86,51 +86,119 @@ struct WebViewRepresentable: UIViewRepresentable {
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
 
+        context.coordinator.attach(to: webView)
         model.webView = webView
-        AppLog.log("WebView load \(url.absoluteString)")
+        AppLog.log("WebView create \(url.absoluteString)")
         webView.load(URLRequest(url: url))
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
-        // Keep the same session; only reload if the requested URL changed externally.
-        if webView.url == nil {
+        // Keep the same session; only load if nothing is loaded yet.
+        if webView.url == nil, !webView.isLoading {
             webView.load(URLRequest(url: url))
         }
+    }
+
+    static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
+        AppLog.log("WebView dismantle")
+        coordinator.detach()
+        uiView.stopLoading()
+        uiView.navigationDelegate = nil
+        uiView.uiDelegate = nil
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         private let model: WebViewModel
         private var observations: [NSKeyValueObservation] = []
+        private weak var webView: WKWebView?
 
         init(model: WebViewModel) {
             self.model = model
         }
 
+        func attach(to webView: WKWebView) {
+            detach()
+            self.webView = webView
+            observations = [
+                webView.observe(\.estimatedProgress, options: [.new]) { [weak self] view, _ in
+                    let progress = view.estimatedProgress
+                    self?.onMain {
+                        self?.model.progress = progress
+                        self?.model.isLoading = progress < 1
+                    }
+                },
+                webView.observe(\.canGoBack, options: [.new]) { [weak self] view, _ in
+                    let value = view.canGoBack
+                    self?.onMain { self?.model.canGoBack = value }
+                },
+                webView.observe(\.canGoForward, options: [.new]) { [weak self] view, _ in
+                    let value = view.canGoForward
+                    self?.onMain { self?.model.canGoForward = value }
+                },
+                webView.observe(\.url, options: [.new]) { [weak self] view, _ in
+                    let url = view.url
+                    self?.onMain { self?.model.currentURL = url }
+                },
+                webView.observe(\.isLoading, options: [.new]) { [weak self] view, _ in
+                    let loading = view.isLoading
+                    self?.onMain { self?.model.isLoading = loading }
+                },
+            ]
+            sync(webView)
+        }
+
+        func detach() {
+            observations.forEach { $0.invalidate() }
+            observations.removeAll()
+            webView = nil
+        }
+
+        private func onMain(_ work: @escaping @MainActor () -> Void) {
+            Task { @MainActor in
+                work()
+            }
+        }
+
+        private func sync(_ webView: WKWebView) {
+            let canGoBack = webView.canGoBack
+            let canGoForward = webView.canGoForward
+            let currentURL = webView.url
+            let isLoading = webView.isLoading
+            let progress = webView.estimatedProgress
+            onMain {
+                model.canGoBack = canGoBack
+                model.canGoForward = canGoForward
+                model.currentURL = currentURL
+                model.isLoading = isLoading
+                model.progress = progress
+            }
+        }
+
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-            model.isLoading = true
-            bind(webView)
+            AppLog.log("WebView load \(webView.url?.absoluteString ?? "(nil)")")
+            sync(webView)
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            model.isLoading = false
-            model.progress = 1
-            sync(webView)
             AppLog.log("WebView finish \(webView.url?.absoluteString ?? "(nil)")")
-            BookingFormPrefill.inject(into: webView)
-            AppLog.log("Prefill inject ran")
+            sync(webView)
+            // Prefill must run on the main thread with a live web view.
+            Task { @MainActor [weak webView] in
+                guard let webView else { return }
+                BookingFormPrefill.inject(into: webView)
+                AppLog.log("Prefill inject ran")
+            }
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            model.isLoading = false
-            sync(webView)
             AppLog.log("WebView fail \(error.localizedDescription)")
+            sync(webView)
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            model.isLoading = false
-            sync(webView)
             AppLog.log("WebView provisional fail \(error.localizedDescription)")
+            sync(webView)
         }
 
         func webView(
@@ -144,37 +212,6 @@ struct WebViewRepresentable: UIViewRepresentable {
                 webView.load(URLRequest(url: url))
             }
             return nil
-        }
-
-        private func bind(_ webView: WKWebView) {
-            guard observations.isEmpty else {
-                sync(webView)
-                return
-            }
-            observations = [
-                webView.observe(\.estimatedProgress) { [weak self] view, _ in
-                    Task { @MainActor in
-                        self?.model.progress = view.estimatedProgress
-                        self?.model.isLoading = view.estimatedProgress < 1
-                    }
-                },
-                webView.observe(\.canGoBack) { [weak self] view, _ in
-                    Task { @MainActor in self?.model.canGoBack = view.canGoBack }
-                },
-                webView.observe(\.canGoForward) { [weak self] view, _ in
-                    Task { @MainActor in self?.model.canGoForward = view.canGoForward }
-                },
-                webView.observe(\.url) { [weak self] view, _ in
-                    Task { @MainActor in self?.model.currentURL = view.url }
-                }
-            ]
-            sync(webView)
-        }
-
-        private func sync(_ webView: WKWebView) {
-            model.canGoBack = webView.canGoBack
-            model.canGoForward = webView.canGoForward
-            model.currentURL = webView.url
         }
     }
 }
