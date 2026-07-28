@@ -10,6 +10,15 @@ enum BookingFormPrefill {
     /// Auto-inject on checkout pages; recaptcha pages are detected and skipped.
     static var autoInjectEnabled = true
 
+    enum Outcome: String {
+        case filled
+        case waiting
+        case captcha
+        case skipped
+        case error
+        case unknown
+    }
+
     /// Prefill only on checkout-like pages.
     static func shouldInject(for url: URL?, trigger: Trigger) -> Bool {
         guard trigger == .manual || autoInjectEnabled else { return false }
@@ -31,23 +40,40 @@ enum BookingFormPrefill {
     }
 
     /// Applies `BookingConfig.json` field values into visible form inputs.
-    static func inject(into webView: WKWebView, config: BookingConfig = .load(), trigger: Trigger = .auto) {
+    static func inject(
+        into webView: WKWebView,
+        config: BookingConfig = .load(),
+        trigger: Trigger = .auto,
+        completion: ((Outcome) -> Void)? = nil
+    ) {
         guard shouldInject(for: webView.url, trigger: trigger) else {
             AppLog.log("Prefill skipped (\(trigger.rawValue)) for \(webView.url?.absoluteString ?? "(nil)")")
+            completion?(.skipped)
             return
         }
         AppLog.log("Prefill inject (\(trigger.rawValue)) \(webView.url?.absoluteString ?? "(nil)")")
         webView.evaluateJavaScript(script(config: config)) { result, error in
             if let error {
                 AppLog.log("Prefill JS error: \(error.localizedDescription)")
-            } else {
-                if let result = result as? String, !result.isEmpty {
-                    AppLog.log("Prefill JS \(result)")
-                } else {
-                    AppLog.log("Prefill JS ok")
-                }
+                completion?(.error)
+                return
             }
+            let text = result as? String ?? ""
+            if !text.isEmpty {
+                AppLog.log("Prefill JS \(text)")
+            } else {
+                AppLog.log("Prefill JS ok")
+            }
+            completion?(outcome(from: text))
         }
+    }
+
+    private static func outcome(from jsResult: String) -> Outcome {
+        if jsResult.contains("\"status\":\"filled\"") { return .filled }
+        if jsResult.contains("\"status\":\"captcha\"") { return .captcha }
+        if jsResult.contains("\"status\":\"waiting\"") { return .waiting }
+        if jsResult.contains("\"status\":\"error\"") { return .error }
+        return .unknown
     }
 
     private static func script(config: BookingConfig) -> String {
@@ -64,9 +90,6 @@ enum BookingFormPrefill {
         // Intentionally conservative: no continuous MutationObserver (that looped on SPAs and crashed WKWebView).
         return """
         (function() {
-          if (window.__parkingPrefillBusy) return;
-          window.__parkingPrefillBusy = true;
-
           var cfg = {
             email: \(email),
             phone: \(phone),
@@ -181,11 +204,19 @@ enum BookingFormPrefill {
             return false;
           }
 
-          function hasCaptcha() {
+          // Only block on a *visible challenge*. ParkMobile embeds a permanent
+          // reCAPTCHA badge iframe; treating that as captcha permanently skipped fill.
+          function hasBlockingCaptcha() {
             try {
-              return !!document.querySelector(
-                'iframe[src*="recaptcha"], .g-recaptcha, #recaptcha, [id*="captcha" i], [class*="captcha" i]'
+              var challenge = document.querySelector(
+                'iframe[src*=\"recaptcha/api2/bframe\"], iframe[title*=\"recaptcha challenge\" i], iframe[src*=\"hcaptcha.com/challenge\"]'
               );
+              if (challenge && visible(challenge)) return true;
+              var modal = document.querySelector(
+                '[class*=\"captcha-modal\" i], [id*=\"captcha-modal\" i], [aria-modal=\"true\"][class*=\"captcha\" i]'
+              );
+              if (modal && visible(modal)) return true;
+              return false;
             } catch (e) {
               return false;
             }
@@ -242,48 +273,53 @@ enum BookingFormPrefill {
 
           function fillOnce() {
             try {
-              if (hasCaptcha()) return { status: 'captcha', filled: 0 };
-              return { status: 'filled', filled: fillFields() };
+              if (hasBlockingCaptcha()) return { status: 'captcha', filled: 0 };
+              var filled = fillFields();
+              if (filled > 0) return { status: 'filled', filled: filled };
+              return { status: 'waiting', filled: 0 };
             } catch (e) {}
             return { status: 'error', filled: 0 };
           }
 
-          var first = fillOnce();
-          var latest = first;
-          setTimeout(function() { latest = fillOnce(); }, 600);
-          setTimeout(function() { latest = fillOnce(); }, 1600);
+          function stopRetry(timer) {
+            if (timer) clearInterval(timer);
+            window.__parkingPrefillBusy = false;
+            window.__parkingPrefillKick = null;
+          }
 
-          // If captcha blocks the first pass, keep retrying until it clears.
+          // Re-entry from Swift (or wand): kick another fill without stacking timers.
+          if (window.__parkingPrefillKick) {
+            var kicked = window.__parkingPrefillKick();
+            try { return JSON.stringify(kicked); } catch (e) { return "kicked"; }
+          }
+
+          window.__parkingPrefillBusy = true;
+          var latest = fillOnce();
           var attempts = 0;
-          var maxAttempts = 60; // ~2 minutes at 2s
+          var maxAttempts = 90; // ~3 minutes at 2s
           var retryTimer = setInterval(function() {
             attempts += 1;
-            if (window.__parkingPrefillBusy !== true) {
-              clearInterval(retryTimer);
-              return;
-            }
             latest = fillOnce();
-            if (latest.status === 'filled') {
-              clearInterval(retryTimer);
-              window.__parkingPrefillBusy = false;
-            } else if (attempts >= maxAttempts) {
-              clearInterval(retryTimer);
-              window.__parkingPrefillBusy = false;
+            if (latest.status === 'filled' || attempts >= maxAttempts) {
+              stopRetry(retryTimer);
             }
           }, 2000);
 
+          window.__parkingPrefillKick = function() {
+            latest = fillOnce();
+            if (latest.status === 'filled') stopRetry(retryTimer);
+            return latest;
+          };
+
+          // Immediate + short delayed passes for SPA form mount.
+          setTimeout(function() { latest = fillOnce(); }, 600);
           setTimeout(function() {
             latest = fillOnce();
-            clearInterval(retryTimer);
-            window.__parkingPrefillBusy = false;
-            try {
-              return JSON.stringify(latest);
-            } catch (e) {
-              return "done";
-            }
-          }, 3200);
+            if (latest.status === 'filled') stopRetry(retryTimer);
+          }, 1600);
+
           try {
-            return JSON.stringify(first);
+            return JSON.stringify(latest);
           } catch (e) {
             return "started";
           }

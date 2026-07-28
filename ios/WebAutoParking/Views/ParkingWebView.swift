@@ -129,6 +129,7 @@ struct WebViewRepresentable: UIViewRepresentable {
         private var observations: [NSKeyValueObservation] = []
         private var lastPublishedProgress: Double = -1
         private var prefillWorkItem: DispatchWorkItem?
+        private var autoPrefillAttempts = 0
 
         init(model: WebViewModel) {
             self.model = model
@@ -150,18 +151,40 @@ struct WebViewRepresentable: UIViewRepresentable {
         func unbind() {
             prefillWorkItem?.cancel()
             prefillWorkItem = nil
+            autoPrefillAttempts = 0
             observations.forEach { $0.invalidate() }
             observations.removeAll()
         }
 
         private func scheduleAutoPrefill(for webView: WKWebView) {
             prefillWorkItem?.cancel()
-            let work = DispatchWorkItem { [weak webView] in
-                guard let webView else { return }
-                BookingFormPrefill.inject(into: webView, trigger: .auto)
+            autoPrefillAttempts = 0
+            enqueueAutoPrefill(for: webView, delay: 0.8)
+        }
+
+        private func enqueueAutoPrefill(for webView: WKWebView, delay: TimeInterval) {
+            prefillWorkItem?.cancel()
+            let work = DispatchWorkItem { [weak self, weak webView] in
+                guard let self, let webView else { return }
+                self.autoPrefillAttempts += 1
+                BookingFormPrefill.inject(into: webView, trigger: .auto) { outcome in
+                    DispatchQueue.main.async {
+                        let shouldRetry: Bool
+                        switch outcome {
+                        case .filled, .skipped, .error:
+                            shouldRetry = false
+                        case .captcha, .waiting, .unknown:
+                            shouldRetry = self.autoPrefillAttempts < 40
+                        }
+                        if shouldRetry {
+                            AppLog.log("Prefill retry \(self.autoPrefillAttempts)/40 after \(outcome.rawValue)")
+                            self.enqueueAutoPrefill(for: webView, delay: 3.0)
+                        }
+                    }
+                }
             }
             prefillWorkItem = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
         }
 
         private func publishProgress(_ progress: Double) {
@@ -191,6 +214,9 @@ struct WebViewRepresentable: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
             AppLog.log("WebView load \(webView.url?.absoluteString ?? "(nil)")")
+            prefillWorkItem?.cancel()
+            prefillWorkItem = nil
+            autoPrefillAttempts = 0
             publishNavigationState(from: webView)
         }
 
