@@ -65,13 +65,16 @@ enum SessionWindow {
         return (start, end)
     }
 
-    /// Local wall time with offset `yyyy-MM-dd'T'HH:mm:ssXXXXX` (e.g. `-04:00`) for ParkMobile.
-    static func isoOffsetDateString(_ date: Date, calendar: Calendar = .current) -> String {
+    /// Local wall clock stamped with a literal `Z`.
+    /// ParkMobile's checkout URL builder takes `getUTCHours()` then appends the local
+    /// offset, so a real `09:45-04:00` becomes `13:45-04:00` (1:45 PM). Feeding the
+    /// Eastern wall time as `…Z` makes their UTC getters keep 09:45 → `09:45-04:00`.
+    static func isoParkMobileZuluWallString(_ date: Date, calendar: Calendar = .current) -> String {
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = calendar.timeZone
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssXXXXX"
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
         return formatter.string(from: date)
     }
 

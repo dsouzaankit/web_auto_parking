@@ -21,7 +21,7 @@ On checkout / login-to-checkout pages (not Find search), the WebView will:
 
 | Step | ParkMobile | SpotHero |
 |------|------------|----------|
-| Start booking | Tap **Reserve. Park Here!** | (facility purchase URL opens checkout) |
+| Start booking | Open checkout with ASAP window (Z-stamped times; skips Reserve race) | (facility purchase URL opens checkout) |
 | Guest | **Continue as a Guest** | Guest checkout by default |
 | Contact | Fill email / phone → **Save & Continue** | Fill email / phone → **Continue** |
 | Vehicle | Fill `#vrn` plate, country, state → **Save & Continue** | Tap **Add** → select **Make and Model** from dropdown → plate + state → **Confirm** |

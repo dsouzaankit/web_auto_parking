@@ -60,7 +60,7 @@ struct Garage: Identifiable, Codable, Equatable, Hashable {
         case .fixedDuration:
             let hours = BookingConfig.clampDuration(durationHours)
             let end = calendar.date(byAdding: .hour, value: hours, to: start) ?? start
-            return FixedDurationURLs.reservation(
+            return FixedDurationURLs.checkout(
                 id: facilityID,
                 start: start,
                 end: end,
@@ -157,11 +157,34 @@ enum FixedDurationURLs {
         var components = URLComponents(string: "https://app.parkmobile.io/reservation/\(trimmed)")!
         if let start, let end {
             components.queryItems = [
-                // Include offset so ParkMobile does not reinterpret wall times.
-                URLQueryItem(name: "startDate", value: SessionWindow.isoOffsetDateString(start, calendar: calendar)),
-                URLQueryItem(name: "endDate", value: SessionWindow.isoOffsetDateString(end, calendar: calendar))
+                URLQueryItem(name: "startDate", value: SessionWindow.isoLocalDateString(start, calendar: calendar)),
+                URLQueryItem(name: "endDate", value: SessionWindow.isoLocalDateString(end, calendar: calendar))
             ]
         }
+        return components.url!
+    }
+
+    /// Guest checkout deep link. Uses Z-stamped local wall times to counter ParkMobile's
+    /// UTC-hour + local-offset formatter bug (otherwise ASAP 9:45 becomes 1:45 PM).
+    static func checkout(
+        id: String,
+        start: Date,
+        end: Date,
+        calendar: Calendar = .current
+    ) -> URL {
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        var components = URLComponents(string: "https://app.parkmobile.io/checkout/reservation/\(trimmed)")!
+        components.queryItems = [
+            URLQueryItem(
+                name: "start_at",
+                value: SessionWindow.isoParkMobileZuluWallString(start, calendar: calendar)
+            ),
+            URLQueryItem(
+                name: "stop_at",
+                value: SessionWindow.isoParkMobileZuluWallString(end, calendar: calendar)
+            ),
+            URLQueryItem(name: "location_origin", value: "flash")
+        ]
         return components.url!
     }
 }
