@@ -30,6 +30,7 @@ On checkout / login-to-checkout pages (not Find search), the WebView will:
 - Prefill runs automatically on reservation / checkout / login-with-checkout URLs; toolbar **wand** also runs it manually.
 - Visible captcha challenges pause fill (badge-only reCAPTCHA is ignored).
 - SpotHero’s vehicle popup has **State or Province** only (no Country field).
+- **ParkMobile time quirk:** their checkout builder takes UTC clock hours then appends the local offset, so a real `09:45-04:00` becomes `13:45-04:00` (start jumps to the old end / 1:45 PM). We open `/checkout/reservation/…` directly with local wall times stamped as `Z` (e.g. `09:45:00Z`) so their UTC getters keep the ASAP hour. Do not switch back to naive/`-04:00` `startDate`+Reserve without retesting.
 
 `sessionDurationHours` may be `3` or `4` (fixed-duration locked window). The Garages tab also has a **3 hours / 4 hours** control that overrides this at runtime.
 
