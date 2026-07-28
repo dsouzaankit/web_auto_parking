@@ -9,11 +9,11 @@ struct BookingConfig: Codable, Equatable {
     var preferGuestCheckout: Bool
     /// Preferred payment: `applePay` (default), `card`, or `paypal`.
     var paymentMethod: String
-    /// ParkMobile locked window length (3 or 4). Overridable in-app.
+    /// Fixed-duration locked window length (3 or 4). Overridable in-app.
     var sessionDurationHours: Int
     var vehicle: VehicleDetails
 
-    /// Allowed ParkMobile session lengths.
+    /// Allowed fixed-duration session lengths.
     static let allowedDurations = [3, 4]
 
     struct VehicleDetails: Codable, Equatable {

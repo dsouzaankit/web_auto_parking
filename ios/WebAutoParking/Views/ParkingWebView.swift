@@ -1,7 +1,7 @@
 import SwiftUI
 import WebKit
 
-struct ParkMobileWebView: View {
+struct ParkingWebView: View {
     let title: String
     let url: URL
 
@@ -87,6 +87,7 @@ struct WebViewRepresentable: UIViewRepresentable {
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
 
         model.webView = webView
+        AppLog.log("WebView load \(url.absoluteString)")
         webView.load(URLRequest(url: url))
         return webView
     }
@@ -115,17 +116,21 @@ struct WebViewRepresentable: UIViewRepresentable {
             model.isLoading = false
             model.progress = 1
             sync(webView)
+            AppLog.log("WebView finish \(webView.url?.absoluteString ?? "(nil)")")
             BookingFormPrefill.inject(into: webView)
+            AppLog.log("Prefill inject ran")
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
             model.isLoading = false
             sync(webView)
+            AppLog.log("WebView fail \(error.localizedDescription)")
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
             model.isLoading = false
             sync(webView)
+            AppLog.log("WebView provisional fail \(error.localizedDescription)")
         }
 
         func webView(
@@ -176,7 +181,7 @@ struct WebViewRepresentable: UIViewRepresentable {
 
 #Preview {
     NavigationStack {
-        ParkMobileWebView(
+        ParkingWebView(
             title: "1525 Harbor Garage",
             url: Garage.harborWeehawken.reservationURL(from: .now)
         )

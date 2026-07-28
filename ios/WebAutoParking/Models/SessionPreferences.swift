@@ -1,7 +1,7 @@
 import Foundation
 import Combine
 
-/// Global ParkMobile session length (3h or 4h). In-app choice overrides `BookingConfig.json`.
+/// Global fixed-duration session length (3h or 4h). In-app choice overrides `BookingConfig.json`.
 @MainActor
 final class SessionPreferences: ObservableObject {
     static let shared = SessionPreferences()

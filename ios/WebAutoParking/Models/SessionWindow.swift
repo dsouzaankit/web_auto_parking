@@ -1,7 +1,7 @@
 import Foundation
 
 enum SessionWindow {
-    /// ParkMobile start/end pickers snap to this many minutes.
+    /// Checkout start/end pickers snap to this many minutes.
     static let snapMinutes = 15
 
     /// Active global duration (3 or 4), from in-app preference / config.
@@ -65,7 +65,7 @@ enum SessionWindow {
         return (start, end)
     }
 
-    /// Local wall time `yyyy-MM-dd'T'HH:mm:ss` (no zone) — ParkMobile `startDate`/`endDate` and SpotHero `starts`/`ends`.
+    /// Local wall time `yyyy-MM-dd'T'HH:mm:ss` (no zone) — fixed-duration `startDate`/`endDate` and flexible `starts`/`ends`.
     static func isoLocalDateString(_ date: Date, calendar: Calendar = .current) -> String {
         let formatter = DateFormatter()
         formatter.calendar = calendar
@@ -90,6 +90,6 @@ enum SessionWindow {
         let startText = formatter.string(from: window.start)
         formatter.dateFormat = "h:mm a"
         let endText = formatter.string(from: window.end)
-        return "\(startText) → \(endText) · ParkMobile \(hours)h · SpotHero rate package"
+        return "\(startText) → \(endText) · fixed \(hours)h · flexible rate package"
     }
 }

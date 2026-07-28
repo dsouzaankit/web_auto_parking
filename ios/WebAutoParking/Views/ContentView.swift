@@ -11,29 +11,29 @@ struct ContentView: View {
             }
 
             NavigationStack {
-                ParkMobileWebView(
-                    title: "ParkMobile Find",
-                    url: ParkMobileURLs.search
+                ParkingWebView(
+                    title: "Find Parking",
+                    url: FixedDurationURLs.search
                 )
             }
             .tabItem {
-                Label("ParkMobile", systemImage: "magnifyingglass")
+                Label("Find", systemImage: "magnifyingglass")
             }
 
             NavigationStack {
-                ParkMobileWebView(
-                    title: "SpotHero",
-                    url: SpotHeroURLs.home
+                ParkingWebView(
+                    title: "Browse",
+                    url: FlexibleDurationURLs.home
                 )
             }
             .tabItem {
-                Label("SpotHero", systemImage: "mappin.and.ellipse")
+                Label("Browse", systemImage: "mappin.and.ellipse")
             }
 
             NavigationStack {
-                ParkMobileWebView(
+                ParkingWebView(
                     title: "Zone Parking",
-                    url: ParkMobileURLs.zoneStart
+                    url: FixedDurationURLs.zoneStart
                 )
             }
             .tabItem {

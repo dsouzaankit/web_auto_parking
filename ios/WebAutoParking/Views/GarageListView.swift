@@ -7,13 +7,15 @@ struct GarageListView: View {
     @State private var selectedGarage: Garage?
     @State private var sessionURL: URL?
     @State private var sessionSummary = ""
+    @State private var lanEnabled = LANLogServer.isEnabled
+    @State private var lanURLSummary = ""
 
     private let timer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
     var body: some View {
         List {
             Section {
-                Picker("ParkMobile duration", selection: $sessionPrefs.durationHours) {
+                Picker("Fixed duration", selection: $sessionPrefs.durationHours) {
                     Text("3 hours").tag(3)
                     Text("4 hours").tag(4)
                 }
@@ -25,16 +27,36 @@ struct GarageListView: View {
             } header: {
                 Text("Session")
             } footer: {
-                Text("Starts on the next 15-minute mark. ParkMobile locks the selected length; SpotHero keeps any free extra time from the rate package. Default also set via BookingConfig.json → sessionDurationHours.")
+                Text("Starts on the next 15-minute mark. Fixed-duration providers lock the selected length; flexible providers keep any free extra time from the rate package. Default also set via BookingConfig.json → sessionDurationHours.")
+            }
+
+            Section {
+                Toggle(LANLogServer.lanServerToggleTitle, isOn: $lanEnabled)
+                    .onChange(of: lanEnabled) { _, enabled in
+                        LANLogServer.applyEnabled(enabled)
+                        refreshLANSummary()
+                    }
+                if lanEnabled {
+                    Text(lanURLSummary)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            } header: {
+                Text("LAN logs")
+            } footer: {
+                Text("Same Wi‑Fi as your PC. Prefer the IP URL on Windows. Port \(LANLogServer.defaultPort) · /logs.txt")
             }
 
             Section {
                 ForEach(store.garages) { garage in
                     Button {
-                        sessionURL = garage.reservationURL(
+                        let url = garage.reservationURL(
                             from: .now,
                             durationHours: sessionPrefs.durationHours
                         )
+                        AppLog.log("Open garage \(garage.name) id=\(garage.facilityID) provider=\(garage.provider.rawValue) url=\(url.absoluteString)")
+                        sessionURL = url
                         selectedGarage = garage
                     } label: {
                         GarageRow(garage: garage)
@@ -68,7 +90,7 @@ struct GarageListView: View {
             }
         }
         .navigationDestination(item: $selectedGarage) { garage in
-            ParkMobileWebView(
+            ParkingWebView(
                 title: garage.name,
                 url: sessionURL ?? garage.reservationURL(
                     from: .now,
@@ -78,9 +100,15 @@ struct GarageListView: View {
         }
         .onReceive(timer) { _ in
             refreshSummary()
+            refreshLANSummary()
         }
         .onAppear {
             refreshSummary()
+            lanEnabled = LANLogServer.isEnabled
+            if lanEnabled {
+                LANLogServer.ensureRunning()
+            }
+            refreshLANSummary()
         }
         .onChange(of: sessionPrefs.durationHours) { _, _ in
             refreshSummary()
@@ -89,6 +117,22 @@ struct GarageListView: View {
 
     private func refreshSummary() {
         sessionSummary = SessionWindow.displayRange(durationHours: sessionPrefs.durationHours)
+    }
+
+    private func refreshLANSummary() {
+        let urls = LANLogServer.displayLANURLs
+        if let ip = urls.ip {
+            lanURLSummary = ip
+            if let host = urls.host {
+                lanURLSummary += "\n\(host)"
+            }
+        } else if let host = urls.host {
+            lanURLSummary = host
+        } else if lanEnabled {
+            lanURLSummary = "Starting… allow Local Network if prompted"
+        } else {
+            lanURLSummary = ""
+        }
     }
 }
 

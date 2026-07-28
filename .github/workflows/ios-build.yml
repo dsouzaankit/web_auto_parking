@@ -35,8 +35,8 @@ jobs:
       - name: Use BookingConfig template for CI
         working-directory: ios
         run: |
-          cp ParkMobileParking/Resources/BookingConfig.example.json \
-             ParkMobileParking/Resources/BookingConfig.json
+          cp WebAutoParking/Resources/BookingConfig.example.json \
+             WebAutoParking/Resources/BookingConfig.json
 
       - name: Generate project
         working-directory: ios
@@ -45,8 +45,8 @@ jobs:
       - name: Build (simulator, unsigned smoke test)
         working-directory: ios
         run: |
-          xcodebuild -project ParkMobileParking.xcodeproj \
-            -scheme ParkMobileParking \
+          xcodebuild -project WebAutoParking.xcodeproj \
+            -scheme WebAutoParking \
             -destination 'generic/platform=iOS Simulator' \
             -configuration Debug \
             build CODE_SIGNING_ALLOWED=NO
@@ -68,8 +68,8 @@ jobs:
       - name: Use BookingConfig template for CI
         working-directory: ios
         run: |
-          cp ParkMobileParking/Resources/BookingConfig.example.json \
-             ParkMobileParking/Resources/BookingConfig.json
+          cp WebAutoParking/Resources/BookingConfig.example.json \
+             WebAutoParking/Resources/BookingConfig.json
 
       - name: Generate project
         working-directory: ios
@@ -85,24 +85,24 @@ jobs:
           set -euo pipefail
 
           package_unsigned_ipa() {
-            APP_PATH="$(find build/DerivedData -name 'ParkMobileParking.app' -type d | head -1)"
+            APP_PATH="$(find build/DerivedData -name 'WebAutoParking.app' -type d | head -1)"
             if [[ -z "$APP_PATH" ]]; then
-              echo "ParkMobileParking.app not found under build/DerivedData"
+              echo "WebAutoParking.app not found under build/DerivedData"
               find build/DerivedData -maxdepth 6 -type d -name '*.app' || true
               exit 1
             fi
             codesign --force --sign - --timestamp=none --deep "$APP_PATH"
-            rm -rf Payload ParkMobileParking.ipa
+            rm -rf Payload WebAutoParking.ipa
             mkdir -p Payload
             cp -R "$APP_PATH" Payload/
-            zip -yr ParkMobileParking.ipa Payload
+            zip -yr WebAutoParking.ipa Payload
             rm -rf Payload
           }
 
           verify_ipa_bundle_id() {
             local plist_path
-            unzip -q ParkMobileParking.ipa -d ipa-verify
-            plist_path="$(find ipa-verify -path '*/ParkMobileParking.app/Info.plist' | head -1)"
+            unzip -q WebAutoParking.ipa -d ipa-verify
+            plist_path="$(find ipa-verify -path '*/WebAutoParking.app/Info.plist' | head -1)"
             BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist_path")"
             echo "CFBundleIdentifier=$BUNDLE_ID"
             if [[ -z "$BUNDLE_ID" || "$BUNDLE_ID" == *'$'* ]]; then
@@ -119,11 +119,11 @@ jobs:
               exit 1
             fi
 
-            ARCHIVE_PATH="$RUNNER_TEMP/ParkMobileParking.xcarchive"
+            ARCHIVE_PATH="$RUNNER_TEMP/WebAutoParking.xcarchive"
             EXPORT_PATH="$RUNNER_TEMP/ipa-export"
 
-            xcodebuild -project ParkMobileParking.xcodeproj \
-              -scheme ParkMobileParking \
+            xcodebuild -project WebAutoParking.xcodeproj \
+              -scheme WebAutoParking \
               -destination 'generic/platform=iOS' \
               -configuration Release \
               -archivePath "$ARCHIVE_PATH" \
@@ -140,12 +140,12 @@ jobs:
               -exportOptionsPlist ExportOptions-development.plist \
               -allowProvisioningUpdates
 
-            cp "$EXPORT_PATH"/*.ipa ParkMobileParking.ipa
+            cp "$EXPORT_PATH"/*.ipa WebAutoParking.ipa
             verify_ipa_bundle_id
           else
             echo "No APPLE_ID secret — building unsigned IPA (re-sign in AltStore)."
-            xcodebuild -project ParkMobileParking.xcodeproj \
-              -scheme ParkMobileParking \
+            xcodebuild -project WebAutoParking.xcodeproj \
+              -scheme WebAutoParking \
               -destination 'generic/platform=iOS' \
               -configuration Release \
               -derivedDataPath build/DerivedData \
@@ -161,6 +161,6 @@ jobs:
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v5
         with:
-          name: ParkMobileParking-ipa
-          path: ios/ParkMobileParking.ipa
+          name: WebAutoParking-ipa
+          path: ios/WebAutoParking.ipa
           if-no-files-found: error

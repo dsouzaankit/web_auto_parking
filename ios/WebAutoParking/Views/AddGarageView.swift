@@ -4,7 +4,7 @@ struct AddGarageView: View {
     @EnvironmentObject private var store: GarageStore
     @Environment(\.dismiss) private var dismiss
 
-    @State private var provider: ParkingProvider = .parkMobile
+    @State private var provider: ParkingProvider = .fixedDuration
     @State private var facilityID = ""
     @State private var name = ""
     @State private var address = ""
@@ -42,13 +42,13 @@ struct AddGarageView: View {
             }
 
             Section("Presets") {
-                Button("1525 Harbor Garage (ParkMobile)") {
+                Button("1525 Harbor Garage") {
                     apply(Garage.harborWeehawken)
                 }
-                Button("The Bisby Garage (ParkMobile)") {
+                Button("The Bisby Garage") {
                     apply(Garage.bisbyJerseyCity)
                 }
-                Button("29245 Mall Dr. E (SpotHero)") {
+                Button("29245 Mall Dr. E") {
                     apply(Garage.mallDriveJerseyCity)
                 }
             }

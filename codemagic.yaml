@@ -11,14 +11,14 @@ workflows:
         distribution_type: ad_hoc
         bundle_identifier: com.webautoparking.app
       vars:
-        XCODE_SCHEME: ParkMobileParking
+        XCODE_SCHEME: WebAutoParking
     scripts:
       - name: Generate Xcode project
         script: |
           brew install xcodegen
           cd ios
-          CFG="ParkMobileParking/Resources/BookingConfig.json"
-          EXAMPLE="ParkMobileParking/Resources/BookingConfig.example.json"
+          CFG="WebAutoParking/Resources/BookingConfig.json"
+          EXAMPLE="WebAutoParking/Resources/BookingConfig.example.json"
           if [[ ! -f "$CFG" ]]; then
             cp "$EXAMPLE" "$CFG"
           fi
@@ -26,7 +26,7 @@ workflows:
       - name: Build ipa
         script: |
           xcode-project build-ipa \
-            --project "$CM_BUILD_DIR/ios/ParkMobileParking.xcodeproj" \
+            --project "$CM_BUILD_DIR/ios/WebAutoParking.xcodeproj" \
             --scheme "$XCODE_SCHEME"
     artifacts:
       - build/ios/ipa/*.ipa
