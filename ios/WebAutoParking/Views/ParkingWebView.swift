@@ -128,6 +128,7 @@ struct WebViewRepresentable: UIViewRepresentable {
         private let model: WebViewModel
         private var observations: [NSKeyValueObservation] = []
         private var lastPublishedProgress: Double = -1
+        private var prefillWorkItem: DispatchWorkItem?
 
         init(model: WebViewModel) {
             self.model = model
@@ -147,8 +148,20 @@ struct WebViewRepresentable: UIViewRepresentable {
         }
 
         func unbind() {
+            prefillWorkItem?.cancel()
+            prefillWorkItem = nil
             observations.forEach { $0.invalidate() }
             observations.removeAll()
+        }
+
+        private func scheduleAutoPrefill(for webView: WKWebView) {
+            prefillWorkItem?.cancel()
+            let work = DispatchWorkItem { [weak webView] in
+                guard let webView else { return }
+                BookingFormPrefill.inject(into: webView, trigger: .auto)
+            }
+            prefillWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: work)
         }
 
         private func publishProgress(_ progress: Double) {
@@ -184,7 +197,7 @@ struct WebViewRepresentable: UIViewRepresentable {
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             AppLog.log("WebView finish \(webView.url?.absoluteString ?? "(nil)")")
             publishNavigationState(from: webView)
-            // Prefill intentionally not run here — DOM injection crashes ParkMobile WKWebView.
+            scheduleAutoPrefill(for: webView)
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {

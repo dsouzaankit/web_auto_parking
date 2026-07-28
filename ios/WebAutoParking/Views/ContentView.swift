@@ -5,7 +5,7 @@ struct ContentView: View {
     /// Only create WKWebViews for tabs the user has opened (avoids 3× WebViews at once).
     @State private var activatedTabs: Set<Int> = [0]
     private let searchBrands = WebBrandOption.findBrands
-    private let browseBrands = WebBrandOption.findBrands
+    private let browseBrands = WebBrandOption.browseBrands
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -88,6 +88,11 @@ private struct WebBrandOption: Identifiable, Hashable {
 
     static let findBrands: [WebBrandOption] = [
         .init(id: "parkmobile-search", label: "ParkMobile", webViewTitle: "ParkMobile", url: FixedDurationURLs.search),
+        .init(id: "spothero-home", label: "SpotHero", webViewTitle: "SpotHero", url: FlexibleDurationURLs.home)
+    ]
+
+    static let browseBrands: [WebBrandOption] = [
+        .init(id: "parkmobile-home", label: "ParkMobile", webViewTitle: "ParkMobile", url: FixedDurationURLs.home),
         .init(id: "spothero-home", label: "SpotHero", webViewTitle: "SpotHero", url: FlexibleDurationURLs.home)
     ]
 }

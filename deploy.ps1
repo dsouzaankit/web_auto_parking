@@ -53,6 +53,15 @@ Write-Host "  [YOU] 2. iPhone Files -> iCloud Drive -> Downloads -> $DestIpaName
 Write-Host "  [YOU] 3. AltStore -> My Apps -> + -> select the IPA"
 Write-Host ""
 
+Write-Step "Deleting older WebAutoParking IPA files from iCloud Downloads"
+$OldIpas = Get-ChildItem -LiteralPath $ICloudDownloads -Filter "WebAutoParking*.ipa" -File -ErrorAction SilentlyContinue
+foreach ($old in $OldIpas) {
+    if ($old.Name -ne $DestIpaName) {
+        Write-Host "    removing $($old.FullName)"
+        Remove-Item -LiteralPath $old.FullName -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Write-Step "Copying IPA to iCloud Downloads"
 Copy-Item -LiteralPath $SourceIpa -Destination $DestIpa -Force
 

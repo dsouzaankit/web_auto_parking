@@ -7,8 +7,8 @@ enum BookingFormPrefill {
         case manual
     }
 
-    /// Keep auto-injection off. Users can run manual prefill from the web toolbar.
-    static var autoInjectEnabled = false
+    /// Auto-inject on checkout pages; recaptcha pages are detected and skipped.
+    static var autoInjectEnabled = true
 
     /// Prefill only on checkout-like pages.
     static func shouldInject(for url: URL?, trigger: Trigger) -> Bool {
@@ -37,11 +37,15 @@ enum BookingFormPrefill {
             return
         }
         AppLog.log("Prefill inject (\(trigger.rawValue)) \(webView.url?.absoluteString ?? "(nil)")")
-        webView.evaluateJavaScript(script(config: config)) { _, error in
+        webView.evaluateJavaScript(script(config: config)) { result, error in
             if let error {
                 AppLog.log("Prefill JS error: \(error.localizedDescription)")
             } else {
-                AppLog.log("Prefill JS ok")
+                if let result = result as? String, !result.isEmpty {
+                    AppLog.log("Prefill JS \(result)")
+                } else {
+                    AppLog.log("Prefill JS ok")
+                }
             }
         }
     }
@@ -177,7 +181,18 @@ enum BookingFormPrefill {
             return false;
           }
 
+          function hasCaptcha() {
+            try {
+              return !!document.querySelector(
+                'iframe[src*="recaptcha"], .g-recaptcha, #recaptcha, [id*="captcha" i], [class*="captcha" i]'
+              );
+            } catch (e) {
+              return false;
+            }
+          }
+
           function fillFields() {
+            var filled = 0;
             var nodes = document.querySelectorAll('input, textarea, select');
             for (var i = 0; i < nodes.length; i++) {
               var el = nodes[i];
@@ -188,55 +203,69 @@ enum BookingFormPrefill {
               if (el.tagName === 'SELECT' && el.value && String(el.value).trim() !== '' && el.selectedIndex > 0) continue;
               var kind = classify(el);
               if (!kind) continue;
-              applyKind(el, kind);
+              if (applyKind(el, kind)) filled += 1;
             }
             if (cfg.email) {
               var emailEl = document.querySelector('#email, input[name=\"email\"], input[type=\"email\"]');
-              if (emailEl && !emailEl.value) setNativeValue(emailEl, cfg.email);
+              if (emailEl && !emailEl.value && setNativeValue(emailEl, cfg.email)) filled += 1;
             }
             if (cfg.phone) {
               var phoneEl = document.querySelector('#phone, input[name=\"phone\"], input[type=\"tel\"]');
-              if (phoneEl && !phoneEl.value) setNativeValue(phoneEl, cfg.phone);
+              if (phoneEl && !phoneEl.value && setNativeValue(phoneEl, cfg.phone)) filled += 1;
             }
             if (cfg.licensePlateNumber) {
               var plateEl = document.querySelector(
                 '#licensePlate, #license-plate, #plate, input[name*=\"plate\" i], input[id*=\"plate\" i], input[name*=\"license\" i]'
               );
-              if (plateEl && !plateEl.value) setNativeValue(plateEl, cfg.licensePlateNumber);
+              if (plateEl && !plateEl.value && setNativeValue(plateEl, cfg.licensePlateNumber)) filled += 1;
             }
             if (cfg.makeAndModel) {
               var makeEl = document.querySelector(
                 'input[name*=\"make\" i], input[id*=\"make\" i], input[name*=\"model\" i], input[id*=\"vehicle\" i], textarea[name*=\"vehicle\" i]'
               );
-              if (makeEl && !makeEl.value) setNativeValue(makeEl, cfg.makeAndModel);
+              if (makeEl && !makeEl.value && setNativeValue(makeEl, cfg.makeAndModel)) filled += 1;
             }
             if (cfg.country) {
               var countryEl = document.querySelector(
                 'select[name*=\"country\" i], select[id*=\"country\" i], input[name*=\"country\" i], input[id*=\"country\" i]'
               );
-              if (countryEl) setNativeValue(countryEl, cfg.country);
+              if (countryEl && setNativeValue(countryEl, cfg.country)) filled += 1;
             }
             if (cfg.state) {
               var stateEl = document.querySelector(
                 'select[name*=\"state\" i], select[id*=\"state\" i], select[name*=\"province\" i], input[name*=\"state\" i], input[id*=\"state\" i]'
               );
-              if (stateEl) setNativeValue(stateEl, cfg.state);
+              if (stateEl && setNativeValue(stateEl, cfg.state)) filled += 1;
             }
+            return filled;
           }
 
           function fillOnce() {
             try {
-              fillFields();
+              if (hasCaptcha()) return { status: 'captcha', filled: 0 };
+              return { status: 'filled', filled: fillFields() };
             } catch (e) {}
+            return { status: 'error', filled: 0 };
           }
 
-          fillOnce();
-          setTimeout(fillOnce, 600);
-          setTimeout(fillOnce, 1600);
+          var first = fillOnce();
+          var latest = first;
+          setTimeout(function() { latest = fillOnce(); }, 600);
+          setTimeout(function() { latest = fillOnce(); }, 1600);
           setTimeout(function() {
-            fillOnce();
+            latest = fillOnce();
             window.__parkingPrefillBusy = false;
+            try {
+              return JSON.stringify(latest);
+            } catch (e) {
+              return "done";
+            }
           }, 3200);
+          try {
+            return JSON.stringify(first);
+          } catch (e) {
+            return "started";
+          }
         })();
         """
     }
