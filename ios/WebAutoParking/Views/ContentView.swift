@@ -4,6 +4,8 @@ struct ContentView: View {
     @State private var selectedTab = 0
     /// Only create WKWebViews for tabs the user has opened (avoids 3× WebViews at once).
     @State private var activatedTabs: Set<Int> = [0]
+    private let searchBrands = WebBrandOption.findBrands
+    private let browseBrands = WebBrandOption.findBrands
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -15,8 +17,20 @@ struct ContentView: View {
             }
             .tag(0)
 
-            webTab(tag: 1, title: "Find Parking", tabLabel: "Find", systemImage: "magnifyingglass", url: FixedDurationURLs.search)
-            webTab(tag: 2, title: "Browse", tabLabel: "Browse", systemImage: "mappin.and.ellipse", url: FlexibleDurationURLs.home)
+            brandedWebTab(
+                tag: 1,
+                title: "Find Parking",
+                tabLabel: "Find",
+                systemImage: "magnifyingglass",
+                brands: searchBrands
+            )
+            brandedWebTab(
+                tag: 2,
+                title: "Browse",
+                tabLabel: "Browse",
+                systemImage: "mappin.and.ellipse",
+                brands: browseBrands
+            )
             webTab(tag: 3, title: "Zone Parking", tabLabel: "Zone", systemImage: "number.circle", url: FixedDurationURLs.zoneStart)
         }
         .onChange(of: selectedTab) { _, tab in
@@ -40,6 +54,79 @@ struct ContentView: View {
             Label(tabLabel, systemImage: systemImage)
         }
         .tag(tag)
+    }
+
+    @ViewBuilder
+    private func brandedWebTab(
+        tag: Int,
+        title: String,
+        tabLabel: String,
+        systemImage: String,
+        brands: [WebBrandOption]
+    ) -> some View {
+        NavigationStack {
+            Group {
+                if activatedTabs.contains(tag) {
+                    MultiBrandWebTabView(title: title, brands: brands)
+                } else {
+                    Color.clear
+                }
+            }
+        }
+        .tabItem {
+            Label(tabLabel, systemImage: systemImage)
+        }
+        .tag(tag)
+    }
+}
+
+private struct WebBrandOption: Identifiable, Hashable {
+    let id: String
+    let label: String
+    let webViewTitle: String
+    let url: URL
+
+    static let findBrands: [WebBrandOption] = [
+        .init(id: "parkmobile-search", label: "ParkMobile", webViewTitle: "ParkMobile", url: FixedDurationURLs.search),
+        .init(id: "spothero-home", label: "SpotHero", webViewTitle: "SpotHero", url: FlexibleDurationURLs.home)
+    ]
+}
+
+private struct MultiBrandWebTabView: View {
+    let title: String
+    let brands: [WebBrandOption]
+    @State private var selectedBrandID: String
+
+    init(title: String, brands: [WebBrandOption]) {
+        self.title = title
+        self.brands = brands
+        _selectedBrandID = State(initialValue: brands.first?.id ?? "")
+    }
+
+    private var selectedBrand: WebBrandOption? {
+        brands.first(where: { $0.id == selectedBrandID }) ?? brands.first
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Picker("\(title) provider", selection: $selectedBrandID) {
+                ForEach(brands) { brand in
+                    Text(brand.label).tag(brand.id)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.top, 8)
+
+            if let selectedBrand {
+                ParkingWebView(
+                    title: "\(title) — \(selectedBrand.webViewTitle)",
+                    url: selectedBrand.url
+                )
+            } else {
+                ContentUnavailableView("No brands configured", systemImage: "exclamationmark.triangle")
+            }
+        }
     }
 }
 

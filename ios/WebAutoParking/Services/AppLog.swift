@@ -25,7 +25,7 @@ enum AppLog {
             guard !FileManager.default.fileExists(atPath: logURL.path) else { return }
             let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
             let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
-            appendLineLocked("Log ready (Parking \(version) build \(build) prefill=\(BookingFormPrefill.isEnabled))")
+            appendLineLocked("Log ready (Parking \(version) build \(build) prefillAuto=\(BookingFormPrefill.autoInjectEnabled))")
             appendLineLocked("path=\(logURL.path)")
             flushLocked()
         }

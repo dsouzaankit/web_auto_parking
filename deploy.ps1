@@ -14,15 +14,25 @@
 $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$IpaName = "WebAutoParking.ipa"
-$SourceIpa = Join-Path $ProjectRoot "ios\build artifacts\ipa\$IpaName"
+$BaseIpaName = "WebAutoParking.ipa"
+$SourceIpa = Join-Path $ProjectRoot "ios\build artifacts\ipa\$BaseIpaName"
 $ICloudDownloads = Join-Path $env:USERPROFILE "iCloudDrive\Downloads"
 # Prefer the path the user asked for when present.
 $PreferredICloud = "C:\Users\dsouzaankit\iCloudDrive\Downloads"
 if (Test-Path -LiteralPath $PreferredICloud) {
     $ICloudDownloads = $PreferredICloud
 }
-$DestIpa = Join-Path $ICloudDownloads $IpaName
+$ProjectSpecPath = Join-Path $ProjectRoot "ios\project.yml"
+$BuildNumber = "unknown"
+if (Test-Path -LiteralPath $ProjectSpecPath) {
+    $match = Select-String -Path $ProjectSpecPath -Pattern 'CURRENT_PROJECT_VERSION:\s*"?(?<build>\d+)"?' -AllMatches
+    if ($match -and $match.Matches.Count -gt 0) {
+        $BuildNumber = $match.Matches[0].Groups["build"].Value
+    }
+}
+$Timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$DestIpaName = "WebAutoParking-b$BuildNumber-$Timestamp.ipa"
+$DestIpa = Join-Path $ICloudDownloads $DestIpaName
 
 function Write-Step($Message) {
     Write-Host "==> $Message"
@@ -39,15 +49,9 @@ if (-not (Test-Path -LiteralPath $ICloudDownloads)) {
 Write-Host ""
 Write-Host "Deploy workflow:"
 Write-Host "  [PC]  1. This script (copy IPA to iCloud Downloads)"
-Write-Host "  [YOU] 2. iPhone Files -> iCloud Drive -> Downloads -> $IpaName"
+Write-Host "  [YOU] 2. iPhone Files -> iCloud Drive -> Downloads -> $DestIpaName"
 Write-Host "  [YOU] 3. AltStore -> My Apps -> + -> select the IPA"
 Write-Host ""
-
-Write-Step "Removing old $IpaName from $ICloudDownloads"
-if (Test-Path -LiteralPath $DestIpa) {
-    Write-Host "    removing $DestIpa"
-    Remove-Item -LiteralPath $DestIpa -Force
-}
 
 Write-Step "Copying IPA to iCloud Downloads"
 Copy-Item -LiteralPath $SourceIpa -Destination $DestIpa -Force
@@ -60,8 +64,9 @@ Write-Host ""
 Write-Host "Done. $DestIpa ($SizeKb KB)"
 Write-Host "Source: $SourceIpa"
 Write-Host "Source mtime: $($src.LastWriteTime)"
+Write-Host "Build: $BuildNumber"
 Write-Host ""
 Write-Host "Next on iPhone:"
 Write-Host "  Wait for iCloud to sync Downloads"
-Write-Host "  AltStore -> My Apps -> + -> $IpaName"
+Write-Host "  AltStore -> My Apps -> + -> $DestIpaName"
 Write-Host "  Or Files -> iCloud Drive -> Downloads -> share/open in AltStore"

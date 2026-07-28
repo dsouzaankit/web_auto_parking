@@ -46,6 +46,13 @@ struct ParkingWebView: View {
                     Image(systemName: "arrow.clockwise")
                 }
 
+                Button {
+                    model.prefill()
+                } label: {
+                    Image(systemName: "wand.and.stars")
+                }
+                .disabled(model.webView == nil)
+
                 ShareLink(item: model.currentURL ?? url) {
                     Image(systemName: "square.and.arrow.up")
                 }
@@ -67,6 +74,10 @@ final class WebViewModel: ObservableObject {
     func goBack() { webView?.goBack() }
     func goForward() { webView?.goForward() }
     func reload() { webView?.reload() }
+    func prefill() {
+        guard let webView else { return }
+        BookingFormPrefill.inject(into: webView, trigger: .manual)
+    }
 }
 
 struct WebViewRepresentable: UIViewRepresentable {

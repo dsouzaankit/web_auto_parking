@@ -2,14 +2,17 @@ import Foundation
 import WebKit
 
 enum BookingFormPrefill {
-    /// Off by default. ParkMobile/SpotHero SPAs crash the WKWebView (and app) when we
-    /// inject DOM fills / click guest / Apple Pay from `evaluateJavaScript`.
-    /// Keep the script for a future opt-in toolbar action after browse is stable.
-    static var isEnabled = false
+    enum Trigger: String {
+        case auto
+        case manual
+    }
 
-    /// Prefill only on checkout-like pages when re-enabled.
-    static func shouldInject(for url: URL?) -> Bool {
-        guard isEnabled else { return false }
+    /// Keep auto-injection off. Users can run manual prefill from the web toolbar.
+    static var autoInjectEnabled = false
+
+    /// Prefill only on checkout-like pages.
+    static func shouldInject(for url: URL?, trigger: Trigger) -> Bool {
+        guard trigger == .manual || autoInjectEnabled else { return false }
         guard let host = url?.host?.lowercased(),
               let path = url?.path.lowercased()
         else { return false }
@@ -27,13 +30,13 @@ enum BookingFormPrefill {
             || path.contains("/book")
     }
 
-    /// Applies `BookingConfig.json`: contact, vehicle, guest checkout, Apple Pay.
-    static func inject(into webView: WKWebView, config: BookingConfig = .load()) {
-        guard shouldInject(for: webView.url) else {
-            AppLog.log("Prefill skipped for \(webView.url?.absoluteString ?? "(nil)")")
+    /// Applies `BookingConfig.json` field values into visible form inputs.
+    static func inject(into webView: WKWebView, config: BookingConfig = .load(), trigger: Trigger = .auto) {
+        guard shouldInject(for: webView.url, trigger: trigger) else {
+            AppLog.log("Prefill skipped (\(trigger.rawValue)) for \(webView.url?.absoluteString ?? "(nil)")")
             return
         }
-        AppLog.log("Prefill inject \(webView.url?.absoluteString ?? "(nil)")")
+        AppLog.log("Prefill inject (\(trigger.rawValue)) \(webView.url?.absoluteString ?? "(nil)")")
         webView.evaluateJavaScript(script(config: config)) { _, error in
             if let error {
                 AppLog.log("Prefill JS error: \(error.localizedDescription)")
@@ -174,41 +177,6 @@ enum BookingFormPrefill {
             return false;
           }
 
-          function preferGuestCheckout() {
-            if (!cfg.preferGuestCheckout) return;
-            var guestBtn = findByText(
-              'button, a, [role=\"button\"], input[type=\"button\"], input[type=\"submit\"]',
-              /continueasguest|checkoutasguest|guestcheckout|without(an)?account|payasguest|bookasguest/
-            );
-            if (guestBtn) click(guestBtn);
-          }
-
-          function selectApplePay() {
-            if (norm(cfg.paymentMethod) !== 'applepay') return;
-            var appleBtn = document.querySelector(
-              'apple-pay-button, button.apple-pay-button, .apple-pay-button, [aria-label*=\"Apple Pay\" i], [aria-label*=\"ApplePay\" i]'
-            );
-            if (appleBtn && visible(appleBtn)) { click(appleBtn); return; }
-
-            var radios = document.querySelectorAll('input[type=\"radio\"]');
-            for (var i = 0; i < radios.length; i++) {
-              var r = radios[i];
-              var key = norm((r.value || '') + ' ' + labelText(r) + ' ' + (r.id || '') + ' ' + (r.name || ''));
-              if (/applepay|apple_pay/.test(key)) {
-                if (!r.checked) {
-                  r.checked = true;
-                  r.dispatchEvent(new Event('input', { bubbles: true }));
-                  r.dispatchEvent(new Event('change', { bubbles: true }));
-                  click(r);
-                }
-                return;
-              }
-            }
-
-            var payLabel = findByText('label, button, a, [role=\"button\"], [role=\"radio\"]', /applepay/);
-            if (payLabel) click(payLabel.closest('label, button, [role=\"button\"], [role=\"radio\"]') || payLabel);
-          }
-
           function fillFields() {
             var nodes = document.querySelectorAll('input, textarea, select');
             for (var i = 0; i < nodes.length; i++) {
@@ -258,9 +226,7 @@ enum BookingFormPrefill {
 
           function fillOnce() {
             try {
-              preferGuestCheckout();
               fillFields();
-              selectApplePay();
             } catch (e) {}
           }
 
@@ -276,7 +242,16 @@ enum BookingFormPrefill {
     }
 
     private static func jsonString(_ value: String) -> String {
-        let data = try? JSONSerialization.data(withJSONObject: value, options: [])
-        return String(data: data ?? Data("\"\"".utf8), encoding: .utf8) ?? "\"\""
+        // Bare strings need .fragmentsAllowed. Without it NSJSONSerialization throws
+        // an ObjC exception (not a Swift Error), so try? cannot catch it → SIGABRT.
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: value,
+            options: [.fragmentsAllowed]
+        ),
+        let encoded = String(data: data, encoding: .utf8)
+        else {
+            return "\"\""
+        }
+        return encoded
     }
 }

@@ -9,3 +9,6 @@ DerivedData/
 
 # Personal booking prefill - copy from BookingConfig.example.json
 ios/WebAutoParking/Resources/BookingConfig.json
+
+# Device crash reports pulled via pymobiledevice3
+crashlogs/

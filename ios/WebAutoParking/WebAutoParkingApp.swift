@@ -9,7 +9,7 @@ struct WebAutoParkingApp: App {
         AppLog.ensureReady()
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
-        AppLog.log("App launch v\(version) build \(build) prefill=\(BookingFormPrefill.isEnabled)")
+        AppLog.log("App launch v\(version) build \(build) prefillAuto=\(BookingFormPrefill.autoInjectEnabled)")
     }
 
     var body: some Scene {
