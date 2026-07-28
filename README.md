@@ -25,7 +25,7 @@ On checkout / login-to-checkout pages (not Find search), the WebView will:
 | Guest | **Continue as a Guest** | Guest checkout by default |
 | Contact | Fill email / phone → **Save & Continue** | Fill email / phone → **Continue** |
 | Vehicle | Fill `#vrn` plate, country, state → **Save & Continue** | Tap **Add** → select **Make and Model** from dropdown → plate + state → **Confirm** |
-| Payment | Tap **Continue with Apple Pay**; check **I acknowledge…** (does not complete purchase) | Leaves payment alone |
+| Payment | Tap **Continue with Apple Pay** (Payment Details only — not Sign in with Apple); check **I acknowledge…** (does not complete purchase) | Leaves payment alone |
 
 - Prefill runs automatically on reservation / checkout / login-with-checkout URLs; toolbar **wand** also runs it manually.
 - Visible captcha challenges pause fill (badge-only reCAPTCHA is ignored).

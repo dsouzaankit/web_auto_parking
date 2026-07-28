@@ -65,7 +65,17 @@ enum SessionWindow {
         return (start, end)
     }
 
-    /// Local wall time `yyyy-MM-dd'T'HH:mm:ss` (no zone) — fixed-duration `startDate`/`endDate` and flexible `starts`/`ends`.
+    /// Local wall time with offset `yyyy-MM-dd'T'HH:mm:ssXXXXX` (e.g. `-04:00`) for ParkMobile.
+    static func isoOffsetDateString(_ date: Date, calendar: Calendar = .current) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssXXXXX"
+        return formatter.string(from: date)
+    }
+
+    /// Local wall time `yyyy-MM-dd'T'HH:mm:ss` (no zone) — flexible `starts`/`ends`.
     static func isoLocalDateString(_ date: Date, calendar: Calendar = .current) -> String {
         let formatter = DateFormatter()
         formatter.calendar = calendar

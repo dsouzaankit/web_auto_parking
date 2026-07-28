@@ -157,8 +157,9 @@ enum FixedDurationURLs {
         var components = URLComponents(string: "https://app.parkmobile.io/reservation/\(trimmed)")!
         if let start, let end {
             components.queryItems = [
-                URLQueryItem(name: "startDate", value: SessionWindow.isoLocalDateString(start, calendar: calendar)),
-                URLQueryItem(name: "endDate", value: SessionWindow.isoLocalDateString(end, calendar: calendar))
+                // Include offset so ParkMobile does not reinterpret wall times.
+                URLQueryItem(name: "startDate", value: SessionWindow.isoOffsetDateString(start, calendar: calendar)),
+                URLQueryItem(name: "endDate", value: SessionWindow.isoOffsetDateString(end, calendar: calendar))
             ]
         }
         return components.url!

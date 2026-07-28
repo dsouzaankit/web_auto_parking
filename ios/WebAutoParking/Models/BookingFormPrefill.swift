@@ -544,13 +544,64 @@ enum BookingFormPrefill {
             return true;
           }
 
+          function expectedStartFromUrl() {
+            try {
+              var u = new URL(location.href);
+              var raw = u.searchParams.get('startDate') || u.searchParams.get('start_at')
+                || u.searchParams.get('starts');
+              if (!raw) return null;
+              var m = String(raw).match(/T(\\d{2}):(\\d{2})/);
+              if (!m) return null;
+              return { hour: parseInt(m[1], 10), minute: parseInt(m[2], 10), raw: raw };
+            } catch (e) { return null; }
+          }
+
+          function timeTextMatches(text, hour24, minute) {
+            var n = norm(text);
+            if (!n) return false;
+            var hour12 = hour24 % 12;
+            if (hour12 === 0) hour12 = 12;
+            var mm = minute < 10 ? ('0' + minute) : String(minute);
+            var ampm = hour24 < 12 ? 'am' : 'pm';
+            // \"9:30 AM\" → 930am after norm; also allow 0930.
+            if (n.indexOf(String(hour12) + mm + ampm) !== -1) return true;
+            if (n.indexOf((hour24 < 10 ? ('0' + hour24) : String(hour24)) + mm) !== -1) return true;
+            return false;
+          }
+
+          function reservationStartMatchesUrl() {
+            var exp = expectedStartFromUrl();
+            if (!exp) return true;
+            var matched = false;
+            var inputs = document.querySelectorAll('input');
+            for (var i = 0; i < inputs.length; i++) {
+              var el = inputs[i];
+              if (!visible(el)) continue;
+              var label = (el.getAttribute('aria-label') || '') + ' ' + (el.name || '') + ' ' + (el.id || '');
+              if (!/start/i.test(label)) continue;
+              if (timeTextMatches(el.value || '', exp.hour, exp.minute)) { matched = true; break; }
+            }
+            return matched;
+          }
+
           function clickReserveParkHere() {
             if (window.__parkingDidReserve) return false;
             var btn = findByText(
               'button, a, [role=\"button\"], input[type=\"button\"], input[type=\"submit\"]',
               /reserve.*parkhere|parkhere|reserveyourspot|reservethisspot/
             );
-            if (!btn) return false;
+            if (!btn || btn.disabled) return false;
+
+            // ParkMobile applies startDate/endDate asynchronously. Clicking Reserve too early
+            // sends a wrong window (often original end → end+duration) into checkout.
+            if (!reservationStartMatchesUrl()) {
+              window.__parkingReserveReadyAt = null;
+              return false;
+            }
+            var now = Date.now();
+            if (!window.__parkingReserveReadyAt) window.__parkingReserveReadyAt = now;
+            if ((now - window.__parkingReserveReadyAt) < 700) return false;
+
             if (!click(btn)) return false;
             window.__parkingDidReserve = true;
             return true;
@@ -622,48 +673,27 @@ enum BookingFormPrefill {
 
           function findContinueWithApplePayButton() {
             if (!wantsApplePay()) return null;
-            var scopes = [];
+            // Only Payment Details — never login \"Continue with Apple\" / Sign in with Apple.
             var payCard = document.querySelector(
               '[data-pmtest-id=\"guest-payment-step-card\"], [data-pmtest-id=\"user-payment-step-card\"]'
             );
-            if (payCard) scopes.push(payCard);
-            scopes.push(document);
-            for (var s = 0; s < scopes.length; s++) {
-              var root = scopes[s];
-              var nodes = root.querySelectorAll('button, a, [role=\"button\"]');
-              for (var i = 0; i < nodes.length; i++) {
-                var el = nodes[i];
-                if (!visible(el) || el.disabled) continue;
-                if (isNativeApplePayBuyButton(el)) continue;
-                // Never tap final purchase.
-                if (el.getAttribute('data-pmtest-id') === 'complete-purchase-button') continue;
-                var t = textOf(el);
-                var html = norm(el.innerHTML || '');
-                // ParkMobile: outline button \"Continue with\" + Apple Pay mark.
-                if (/continuewithapplepay/.test(t)) return el;
-                if (/continuewith/.test(t) && (/applepay/.test(t) || /applepay/.test(html))) return el;
-                if (root !== document && /^continuewith$/.test(t)) return el;
-              }
-            }
-            // Global fallback (still skip buy / complete).
-            var global = findByText(
-              'button, a, [role=\"button\"]',
-              /continuewithapplepay|continuewithapple/
-            );
-            if (global && !isNativeApplePayBuyButton(global)
-                && global.getAttribute('data-pmtest-id') !== 'complete-purchase-button') {
-              return global;
-            }
-            // \"Continue with\" alone only inside payment step card.
-            if (payCard) {
-              var only = Array.prototype.find.call(
-                payCard.querySelectorAll('button, a, [role=\"button\"]'),
-                function(el) {
-                  return visible(el) && !el.disabled && /continuewith/.test(textOf(el))
-                    && !isNativeApplePayBuyButton(el);
-                }
-              );
-              if (only) return only;
+            if (!payCard || !visible(payCard)) return null;
+
+            var nodes = payCard.querySelectorAll('button, a, [role=\"button\"]');
+            for (var i = 0; i < nodes.length; i++) {
+              var el = nodes[i];
+              if (!visible(el) || el.disabled) continue;
+              if (isNativeApplePayBuyButton(el)) continue;
+              if (el.getAttribute('data-pmtest-id') === 'complete-purchase-button') continue;
+              if (el.getAttribute('data-pmtest-id') === 'apple-login-button') continue;
+              var t = textOf(el);
+              var html = norm(el.innerHTML || '');
+              // Must be Apple *Pay*. \"continuewithapple\" alone is Sign in with Apple.
+              if (/signinwithapple/.test(t)) continue;
+              if (/continuewithapplepay/.test(t)) return el;
+              if (/continuewith/.test(t) && /applepay/.test(html) && !/continuewithapple$/.test(t)) return el;
+              // Payment card: \"Continue with\" + Apple Pay glyph (text may be only \"Continue with\").
+              if (/^continuewith$/.test(t) && /applepay/.test(html)) return el;
             }
             return null;
           }
