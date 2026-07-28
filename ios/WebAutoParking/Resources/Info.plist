@@ -2,19 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleDisplayName</key>
-	<string>Parking</string>
-	<key>UIApplicationSceneManifest</key>
-	<dict>
-		<key>UIApplicationSupportsMultipleScenes</key>
-		<false/>
-	</dict>
-	<key>UILaunchScreen</key>
-	<dict/>
-	<key>UISupportedInterfaceOrientations</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-	</array>
+	<!-- Merged with GENERATE_INFOPLIST_FILE (launch screen / scene). Keep privacy + ATS here. -->
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Parking serves debug logs on your Wi‑Fi so you can open them from a PC browser on the same network.</string>
 	<key>NSBonjourServices</key>
