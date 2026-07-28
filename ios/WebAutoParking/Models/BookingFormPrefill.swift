@@ -605,6 +605,178 @@ enum BookingFormPrefill {
             return !!(email || phone);
           }
 
+          function wantsApplePay() {
+            var m = norm(cfg.paymentMethod || '');
+            return !m || m === 'applepay' || m === 'apple';
+          }
+
+          function isNativeApplePayBuyButton(el) {
+            if (!el) return false;
+            try {
+              var style = window.getComputedStyle(el);
+              var appearance = String(style.webkitAppearance || style.getPropertyValue('-webkit-appearance') || '');
+              // Native Apple Pay button is used to complete purchase — never auto-tap.
+              return appearance.indexOf('apple-pay-button') !== -1;
+            } catch (e) { return false; }
+          }
+
+          function findContinueWithApplePayButton() {
+            if (!wantsApplePay()) return null;
+            var scopes = [];
+            var payCard = document.querySelector(
+              '[data-pmtest-id=\"guest-payment-step-card\"], [data-pmtest-id=\"user-payment-step-card\"]'
+            );
+            if (payCard) scopes.push(payCard);
+            scopes.push(document);
+            for (var s = 0; s < scopes.length; s++) {
+              var root = scopes[s];
+              var nodes = root.querySelectorAll('button, a, [role=\"button\"]');
+              for (var i = 0; i < nodes.length; i++) {
+                var el = nodes[i];
+                if (!visible(el) || el.disabled) continue;
+                if (isNativeApplePayBuyButton(el)) continue;
+                // Never tap final purchase.
+                if (el.getAttribute('data-pmtest-id') === 'complete-purchase-button') continue;
+                var t = textOf(el);
+                var html = norm(el.innerHTML || '');
+                // ParkMobile: outline button \"Continue with\" + Apple Pay mark.
+                if (/continuewithapplepay/.test(t)) return el;
+                if (/continuewith/.test(t) && (/applepay/.test(t) || /applepay/.test(html))) return el;
+                if (root !== document && /^continuewith$/.test(t)) return el;
+              }
+            }
+            // Global fallback (still skip buy / complete).
+            var global = findByText(
+              'button, a, [role=\"button\"]',
+              /continuewithapplepay|continuewithapple/
+            );
+            if (global && !isNativeApplePayBuyButton(global)
+                && global.getAttribute('data-pmtest-id') !== 'complete-purchase-button') {
+              return global;
+            }
+            // \"Continue with\" alone only inside payment step card.
+            if (payCard) {
+              var only = Array.prototype.find.call(
+                payCard.querySelectorAll('button, a, [role=\"button\"]'),
+                function(el) {
+                  return visible(el) && !el.disabled && /continuewith/.test(textOf(el))
+                    && !isNativeApplePayBuyButton(el);
+                }
+              );
+              if (only) return only;
+            }
+            return null;
+          }
+
+          function clickContinueWithApplePay() {
+            var now = Date.now();
+            if (window.__parkingApplePayAt && (now - window.__parkingApplePayAt) < 2500) return false;
+            var btn = findContinueWithApplePayButton();
+            if (!btn) return false;
+            if (!click(btn)) return false;
+            window.__parkingApplePayAt = now;
+            return true;
+          }
+
+          function isCheckedControl(el) {
+            if (!el) return false;
+            if (el.checked) return true;
+            if (el.getAttribute && el.getAttribute('aria-checked') === 'true') return true;
+            var input = (el.matches && el.matches('input')) ? el : el.querySelector('input[type=\"checkbox\"]');
+            if (input && input.checked) return true;
+            return false;
+          }
+
+          function acknowledgeTargets() {
+            var out = [];
+            function add(el) {
+              if (!el) return;
+              for (var i = 0; i < out.length; i++) if (out[i] === el) return;
+              out.push(el);
+            }
+            var sels = [
+              '[data-pmtest-id=\"resale-disclaimer-checkbox\"]',
+              '#resale-disclaimer-acknowledgment',
+              'input[name=\"resale-disclaimer-acknowledgment\"]',
+              '[data-pmtest-id=\"multiple-reservations-acknowledgment-checkbox\"]',
+              '#multiple-reservations-acknowledgment',
+              'input[name=\"multiple-reservations-acknowledgment\"]'
+            ];
+            for (var i = 0; i < sels.length; i++) {
+              var nodes = document.querySelectorAll(sels[i]);
+              for (var j = 0; j < nodes.length; j++) add(nodes[j]);
+            }
+            // Label / nearby text: \"I acknowledge...\"
+            var labels = document.querySelectorAll('label, [role=\"checkbox\"], input[type=\"checkbox\"]');
+            for (var k = 0; k < labels.length; k++) {
+              var el = labels[k];
+              if (!visible(el)) continue;
+              var t = textOf(el) + ' ' + labelText(el);
+              if (/iacknowledge/.test(t)) add(el);
+            }
+            return out;
+          }
+
+          function acknowledgeNeedsCheck() {
+            var targets = acknowledgeTargets();
+            for (var i = 0; i < targets.length; i++) {
+              var el = targets[i];
+              if (!visible(el) && !(el.querySelector && el.querySelector('input'))) continue;
+              var clickable = el;
+              if (!visible(el) && el.querySelector) {
+                var inner = el.querySelector('input[type=\"checkbox\"], [role=\"checkbox\"], button, label');
+                if (inner && visible(inner)) clickable = inner;
+                else continue;
+              }
+              if (!isCheckedControl(clickable) && !isCheckedControl(el)) return true;
+            }
+            return false;
+          }
+
+          function checkAcknowledgeBoxes() {
+            var now = Date.now();
+            if (window.__parkingAckAt && (now - window.__parkingAckAt) < 1500) return false;
+            var did = false;
+            var targets = acknowledgeTargets();
+            for (var i = 0; i < targets.length; i++) {
+              var el = targets[i];
+              var clickable = el;
+              if (!visible(el)) {
+                var inner = el.querySelector && el.querySelector('input[type=\"checkbox\"], [role=\"checkbox\"]');
+                if (inner && visible(inner)) clickable = inner;
+                else continue;
+              }
+              if (isCheckedControl(clickable) || isCheckedControl(el)) continue;
+              var input = (clickable.matches && clickable.matches('input[type=\"checkbox\"]'))
+                ? clickable
+                : (clickable.querySelector && clickable.querySelector('input[type=\"checkbox\"]'));
+              if (input && !input.checked) {
+                try {
+                  input.click();
+                  if (!input.checked) {
+                    input.checked = true;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                  }
+                  did = true;
+                  continue;
+                } catch (e) {}
+              }
+              if (click(clickable)) did = true;
+            }
+            if (did) window.__parkingAckAt = now;
+            return did;
+          }
+
+          function paymentSectionNeedsAction() {
+            // ParkMobile only — SpotHero payment left alone.
+            var onPM = /parkmobile\\.io/i.test(location.hostname || '');
+            if (!onPM) return false;
+            if (wantsApplePay() && findContinueWithApplePayButton()) return true;
+            if (acknowledgeNeedsCheck()) return true;
+            return false;
+          }
+
           function fillOnce() {
             try {
               if (hasBlockingCaptcha()) return { status: 'captcha', filled: 0, action: 'captcha' };
@@ -621,15 +793,27 @@ enum BookingFormPrefill {
               // SpotHero contact Continue + ParkMobile Save & Continue.
               if (clickSpotHeroContactContinue()) action = action || 'spotHeroContinue';
               if (clickSaveAndContinue()) action = action || 'saveContinue';
+              // ParkMobile Payment Details → Continue with Apple Pay; Confirm → I acknowledge.
+              // Never taps Complete Purchase / Buy with Apple Pay.
+              if (clickContinueWithApplePay()) action = action || 'applePay';
+              if (checkAcknowledgeBoxes()) action = action || 'acknowledge';
               if (action) {
                 return { status: 'advanced', filled: filled, action: action };
               }
               if (filled > 0) {
                 // Keep going if more checkout steps still need input.
-                if (contactSectionNeedsInput() || vehicleSectionNeedsInput()) {
+                if (contactSectionNeedsInput() || vehicleSectionNeedsInput() || paymentSectionNeedsAction()) {
                   return { status: 'waiting', filled: filled, action: 'partial' };
                 }
                 return { status: 'filled', filled: filled, action: 'done' };
+              }
+              if (paymentSectionNeedsAction()) {
+                return { status: 'waiting', filled: 0, action: 'paymentPending' };
+              }
+              // After Apple Pay / acknowledge (no field fills this pass), stop if nothing left.
+              if ((window.__parkingApplePayAt || window.__parkingAckAt)
+                  && !contactSectionNeedsInput() && !vehicleSectionNeedsInput()) {
+                return { status: 'filled', filled: 0, action: 'done' };
               }
               return { status: 'waiting', filled: 0, action: 'idle' };
             } catch (e) {}
