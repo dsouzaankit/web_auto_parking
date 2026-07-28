@@ -193,7 +193,7 @@ struct WebViewRepresentable: UIViewRepresentable {
                         case .skipped:
                             // Search pages stay skipped; login/checkout URL changes restart via KVO.
                             shouldRetry = false
-                        case .captcha, .waiting, .unknown:
+                        case .advanced, .captcha, .waiting, .unknown:
                             shouldRetry = self.autoPrefillAttempts < 40
                         }
                         if shouldRetry {
