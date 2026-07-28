@@ -2,10 +2,9 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var selectedTab = 0
-    /// Only create WKWebViews for tabs the user has opened (avoids 3× WebViews at once).
+    /// Only create WKWebViews for tabs the user has opened (avoids multiple WebViews at once).
     @State private var activatedTabs: Set<Int> = [0]
     private let searchBrands = WebBrandOption.findBrands
-    private let browseBrands = WebBrandOption.browseBrands
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -24,14 +23,7 @@ struct ContentView: View {
                 systemImage: "magnifyingglass",
                 brands: searchBrands
             )
-            brandedWebTab(
-                tag: 2,
-                title: "Browse",
-                tabLabel: "Browse",
-                systemImage: "mappin.and.ellipse",
-                brands: browseBrands
-            )
-            webTab(tag: 3, title: "Zone Parking", tabLabel: "Zone", systemImage: "number.circle", url: FixedDurationURLs.zoneStart)
+            webTab(tag: 2, title: "Zone Parking", tabLabel: "Zone", systemImage: "number.circle", url: FixedDurationURLs.zoneStart)
         }
         .onChange(of: selectedTab) { _, tab in
             activatedTabs.insert(tab)
@@ -91,12 +83,6 @@ private struct WebBrandOption: Identifiable, Hashable {
     static let findBrands: [WebBrandOption] = [
         .init(id: "parkmobile-search", label: "ParkMobile", webViewTitle: "ParkMobile", url: FixedDurationURLs.search),
         .init(id: "spothero-search", label: "SpotHero", webViewTitle: "SpotHero", url: spotHeroSearch)
-    ]
-
-    /// Browse defaults to SpotHero so Find/Browse are not identical on first open.
-    static let browseBrands: [WebBrandOption] = [
-        .init(id: "spothero-search", label: "SpotHero", webViewTitle: "SpotHero", url: spotHeroSearch),
-        .init(id: "parkmobile-search", label: "ParkMobile", webViewTitle: "ParkMobile", url: FixedDurationURLs.search)
     ]
 }
 
