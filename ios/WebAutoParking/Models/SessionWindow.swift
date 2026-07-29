@@ -172,35 +172,30 @@ enum SessionWindow {
         }
     }
 
-    /// ParkChirp Harbor evening window (ignores Session ASAP/−15m/−30m UI).
-    /// - Before 6:00 PM: start **5:30 PM**, end **11:30 PM** (same calendar day).
-    /// - At/after 6:00 PM: start = last :30 mark (−30m), end **11:30 PM** same day.
-    /// - If start would be at/after end (past 11:30 PM): next day **5:30 PM → 11:30 PM**.
+    /// ParkChirp Harbor evening window: **5:30 PM → 11:30 PM** on `date`'s calendar day.
+    /// Prefill may walk today + next 3 days until the SPA accepts a candidate.
     static func parkChirpLockedEveningWindow(
         on date: Date = .now,
         calendar: Calendar = .current
     ) -> (start: Date, end: Date) {
-        let sixPM = calendar.date(bySettingHour: 18, minute: 0, second: 0, of: date) ?? date
-        let fiveThirty = calendar.date(bySettingHour: 17, minute: 30, second: 0, of: date) ?? date
-        let elevenThirty = calendar.date(bySettingHour: 23, minute: 30, second: 0, of: date) ?? date
+        let start = calendar.date(bySettingHour: 17, minute: 30, second: 0, of: date) ?? date
+        let end = calendar.date(bySettingHour: 23, minute: 30, second: 0, of: date) ?? start
+        return (start, end)
+    }
 
-        let start: Date
-        if date < sixPM {
-            start = fiveThirty
-        } else {
-            start = previousMinuteMark(atOrBefore: date, interval: 30, calendar: calendar)
+    /// Today + next `futureDays` evenings at 5:30→11:30 (deep-link / setTimes candidates).
+    static func parkChirpEveningCandidates(
+        on date: Date = .now,
+        calendar: Calendar = .current,
+        futureDays: Int = 3
+    ) -> [(start: Date, end: Date)] {
+        let days = max(futureDays, 0)
+        var out: [(start: Date, end: Date)] = []
+        for offset in 0...days {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: date) else { continue }
+            out.append(parkChirpLockedEveningWindow(on: day, calendar: calendar))
         }
-
-        if start < elevenThirty {
-            return (start, elevenThirty)
-        }
-
-        guard let nextDay = calendar.date(byAdding: .day, value: 1, to: date) else {
-            return (fiveThirty, elevenThirty)
-        }
-        let nextStart = calendar.date(bySettingHour: 17, minute: 30, second: 0, of: nextDay) ?? nextDay
-        let nextEnd = calendar.date(bySettingHour: 23, minute: 30, second: 0, of: nextDay) ?? nextStart
-        return (nextStart, nextEnd)
+        return out
     }
 
     static func displayRange(
