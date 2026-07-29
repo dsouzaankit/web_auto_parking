@@ -75,12 +75,28 @@ final class GarageStore: ObservableObject {
                 result.append(preset)
             }
         }
-        return result
+        // Keep default order: ParkChirp Harbor first when present.
+        return Self.orderedWithDefaultsFirst(result)
+    }
+
+    /// Stable list: presets in `defaultGarages` order, then any custom garages.
+    private static func orderedWithDefaultsFirst(_ garages: [Garage]) -> [Garage] {
+        var remaining = garages
+        var ordered: [Garage] = []
+        for preset in defaultGarages {
+            if let idx = remaining.firstIndex(where: {
+                $0.facilityID == preset.facilityID && $0.provider == preset.provider
+            }) {
+                ordered.append(remaining.remove(at: idx))
+            }
+        }
+        ordered.append(contentsOf: remaining)
+        return ordered
     }
 
     private static let defaultGarages: [Garage] = [
-        .harborWeehawken,
         .harborParkChirp,
+        .harborWeehawken,
         .bisbyJerseyCity,
         .mallDriveJerseyCity
     ]

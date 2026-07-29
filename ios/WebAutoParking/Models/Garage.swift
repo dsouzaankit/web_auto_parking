@@ -81,17 +81,12 @@ struct Garage: Identifiable, Codable, Equatable, Hashable {
                 calendar: calendar
             )
         case .parkChirp:
-            let start = SessionWindow.startDateParkChirp(
-                mode: startMode,
-                from: date,
-                calendar: calendar
-            )
-            let hours = BookingConfig.clampDuration(durationHours)
-            let end = calendar.date(byAdding: .hour, value: hours, to: start) ?? start
+            // Harbor ParkChirp: always today 5:30 PM → 11:30 PM (ignores Session ASAP/−15m/−30m + duration).
+            let window = SessionWindow.parkChirpLockedEveningWindow(on: date, calendar: calendar)
             return ParkChirpURLs.hourlyCheckout(
                 facilitySlug: facilityID,
-                start: start,
-                end: end,
+                start: window.start,
+                end: window.end,
                 calendar: calendar
             )
         }
@@ -127,7 +122,7 @@ struct Garage: Identifiable, Codable, Equatable, Hashable {
         provider: .parkChirp,
         name: "1525 Harbor Blvd (ParkChirp)",
         address: "1525 Harbor Boulevard, Weehawken Township, NJ 07086",
-        notes: "Sign in on ParkChirp, then Checkout. Pull ticket; exit via intercom with Propark reservation. Times snap to :00/:30."
+        notes: "Locked 5:30–11:30 PM. Sign in on ParkChirp, then Checkout. Pull ticket; exit via intercom with Propark reservation."
     )
 
     enum CodingKeys: String, CodingKey {

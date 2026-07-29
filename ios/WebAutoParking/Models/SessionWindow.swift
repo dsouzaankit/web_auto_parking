@@ -172,6 +172,16 @@ enum SessionWindow {
         }
     }
 
+    /// Fixed ParkChirp Harbor evening window: 5:30 PM → 11:30 PM on `date`'s calendar day.
+    static func parkChirpLockedEveningWindow(
+        on date: Date = .now,
+        calendar: Calendar = .current
+    ) -> (start: Date, end: Date) {
+        let start = calendar.date(bySettingHour: 17, minute: 30, second: 0, of: date) ?? date
+        let end = calendar.date(bySettingHour: 23, minute: 30, second: 0, of: date) ?? start
+        return (start, end)
+    }
+
     static func displayRange(
         from date: Date = .now,
         calendar: Calendar = .current,

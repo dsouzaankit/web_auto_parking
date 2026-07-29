@@ -41,11 +41,11 @@ struct AddGarageView: View {
             }
 
             Section("Presets") {
-                Button("1525 Harbor Garage") {
-                    apply(Garage.harborWeehawken)
-                }
                 Button("1525 Harbor (ParkChirp)") {
                     apply(Garage.harborParkChirp)
+                }
+                Button("1525 Harbor Garage") {
+                    apply(Garage.harborWeehawken)
                 }
                 Button("The Bisby Garage") {
                     apply(Garage.bisbyJerseyCity)
