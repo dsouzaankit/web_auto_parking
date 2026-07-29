@@ -172,33 +172,37 @@ enum SessionWindow {
         }
     }
 
-    /// ParkChirp Harbor deep-link default: **5:30 PM → 11:00 PM** on `date`'s calendar day.
-    /// Prefill walks today + next 3 days and picks earliest available start ≥ 5:30 → 11p slot.
+    /// ParkChirp Harbor default deep link: **5:30 PM → 11:30 PM** on `date`'s calendar day.
     static func parkChirpLockedEveningWindow(
         on date: Date = .now,
         calendar: Calendar = .current
     ) -> (start: Date, end: Date) {
         let start = calendar.date(bySettingHour: 17, minute: 30, second: 0, of: date) ?? date
-        let end = calendar.date(bySettingHour: 23, minute: 0, second: 0, of: date) ?? start
+        let end = calendar.date(bySettingHour: 23, minute: 30, second: 0, of: date) ?? start
         return (start, end)
     }
 
-    /// Today + next `futureDays` calendar dates (`yyyy-MM-dd`) for ParkChirp setTimes walk.
-    static func parkChirpEveningCandidateDates(
+    /// Today + next `futureDays`: for each day, start at **5:30 / 6:00 / … / 11:00 PM**, end **11:30 PM**.
+    /// Prefill walks this list until the SPA accepts a window as-is.
+    static func parkChirpEveningCandidates(
         on date: Date = .now,
         calendar: Calendar = .current,
         futureDays: Int = 3
-    ) -> [String] {
-        let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = calendar.timeZone
-        formatter.dateFormat = "yyyy-MM-dd"
+    ) -> [(start: Date, end: Date)] {
         let days = max(futureDays, 0)
-        var out: [String] = []
+        // 5:30 PM through 11:00 PM inclusive, :30 steps.
+        let startMinuteMarks = Array(stride(from: 17 * 60 + 30, through: 23 * 60, by: 30))
+        var out: [(start: Date, end: Date)] = []
         for offset in 0...days {
             guard let day = calendar.date(byAdding: .day, value: offset, to: date) else { continue }
-            out.append(formatter.string(from: day))
+            let end = calendar.date(bySettingHour: 23, minute: 30, second: 0, of: day) ?? day
+            for mark in startMinuteMarks {
+                let hour = mark / 60
+                let minute = mark % 60
+                guard let start = calendar.date(bySettingHour: hour, minute: minute, second: 0, of: day)
+                else { continue }
+                out.append((start, end))
+            }
         }
         return out
     }

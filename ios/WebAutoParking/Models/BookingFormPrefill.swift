@@ -99,10 +99,16 @@ enum BookingFormPrefill {
         let state = jsonString(config.vehicle.normalizedState)
         let preferGuest = config.preferGuestCheckout ? "true" : "false"
         let payment = jsonString(config.prefersApplePay ? "applePay" : config.paymentMethod)
-        // Today + next 3 dates — prefill picks earliest start ≥ 5:30 → 11p until SPA accepts.
-        let parkChirpDates = SessionWindow.parkChirpEveningCandidateDates()
-        let parkChirpDatesJSON: String = {
-            guard let data = try? JSONSerialization.data(withJSONObject: parkChirpDates),
+        // Today+3 days × 5:30…11:00 → 11:30 — prefill walks until SPA accepts as-is.
+        let parkChirpCandidates = SessionWindow.parkChirpEveningCandidates()
+        let parkChirpCandidatesJSON: String = {
+            let pairs = parkChirpCandidates.map { window in
+                [
+                    "startSec": SessionWindow.unixParkChirpWallSeconds(window.start),
+                    "endSec": SessionWindow.unixParkChirpWallSeconds(window.end)
+                ]
+            }
+            guard let data = try? JSONSerialization.data(withJSONObject: pairs),
                   let text = String(data: data, encoding: .utf8)
             else { return "[]" }
             return text
@@ -121,7 +127,7 @@ enum BookingFormPrefill {
             state: \(state),
             preferGuestCheckout: \(preferGuest),
             paymentMethod: \(payment),
-            parkChirpDates: \(parkChirpDatesJSON)
+            parkChirpCandidates: \(parkChirpCandidatesJSON)
           };
 
           function norm(s) { return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ''); }
@@ -996,8 +1002,10 @@ enum BookingFormPrefill {
             } catch (e) { return false; }
           }
 
-          function parkChirpDateList() {
-            return (cfg.parkChirpDates && cfg.parkChirpDates.length) ? cfg.parkChirpDates : [];
+          function parkChirpCandidateList() {
+            return (cfg.parkChirpCandidates && cfg.parkChirpCandidates.length)
+              ? cfg.parkChirpCandidates
+              : [];
           }
 
           function parkChirpPickers() {
@@ -1009,129 +1017,91 @@ enum BookingFormPrefill {
             };
           }
 
-          /// Earliest start-time option at or after 5:30 PM.
-          function parkChirpEarliestStartAtOrAfter(st, minHHMM) {
-            if (!st || !st.options) return null;
-            var best = null;
-            for (var i = 0; i < st.options.length; i++) {
-              var v = st.options[i].value || '';
-              if (!/^\\d{2}:\\d{2}$/.test(v)) continue;
-              if (v < minHHMM) continue;
-              if (best === null || v < best) best = v;
-            }
-            return best;
-          }
-
-          /// Prefer 11:00 PM, else 11:30 PM.
-          function parkChirpEndSlot(et) {
-            if (parkChirpHasOption(et, '23:00')) return '23:00';
-            if (parkChirpHasOption(et, '23:30')) return '23:30';
-            return null;
-          }
-
-          function parkChirpWindowAccepted(wanted) {
-            if (!wanted) return false;
+          /// True when GUI still shows this candidate (SPA did not rewrite overnight / other day).
+          function parkChirpWindowAccepted(startSec, endSec) {
+            var start = parkChirpWallPartsFromUnix(startSec);
+            var end = parkChirpWallPartsFromUnix(endSec);
             var p = parkChirpPickers();
             if (!p.sd || !p.st || !p.ed || !p.et) return false;
-            if (p.sd.value !== wanted.date || p.st.value !== wanted.startTime) return false;
-            if (p.ed.value !== wanted.date || p.et.value !== wanted.endTime) return false;
+            if (p.sd.value !== start.date || p.st.value !== start.time) return false;
+            if (p.ed.value !== end.date || p.et.value !== end.time) return false;
             try {
               var u = new URL(location.href);
               var urlStart = u.searchParams.get('startTime') || '';
               var urlEnd = u.searchParams.get('endTime') || '';
-              if (urlStart && urlEnd
-                  && (urlStart !== String(wanted.startSec) || urlEnd !== String(wanted.endSec))) {
+              // URL may lag briefly; selects are authoritative. If URL present and disagrees, reject.
+              if (urlStart && urlEnd && (urlStart !== String(startSec) || urlEnd !== String(endSec))) {
                 return false;
               }
             } catch (e) {}
             return true;
           }
 
-          /// Per date: earliest available start ≥ 5:30 PM → 11p end slot. Walk today + 3 future days.
+          function parkChirpApplyCandidate(startSec, endSec) {
+            var start = parkChirpWallPartsFromUnix(startSec);
+            var end = parkChirpWallPartsFromUnix(endSec);
+            var p = parkChirpPickers();
+            if (!p.sd || !p.st || !p.ed || !p.et || !p.sd.options.length) return 'wait';
+            // Date missing from picker (full / past / sold out) → skip this candidate.
+            if (!parkChirpHasOption(p.sd, start.date) || !parkChirpHasOption(p.ed, end.date)) {
+              return 'skip';
+            }
+            parkChirpSetSelect(p.sd, start.date);
+            parkChirpSetSelect(p.ed, end.date);
+            // Time options may cascade after date — require 5:30–11:00 start and 11:30 end slots.
+            if (!parkChirpHasOption(p.st, start.time) || !parkChirpHasOption(p.et, end.time)) {
+              return 'skip';
+            }
+            parkChirpSetSelect(p.st, start.time);
+            parkChirpSetSelect(p.et, end.time);
+            restoreParkChirpUrlTimes(startSec, endSec);
+            return 'applied';
+          }
+
+          /// Walk today→+3 days × start 5:30…11:00 → end 11:30 until SPA keeps the window as-is.
           function applyParkChirpUrlDatesAndTimes() {
             if (!isParkChirp()) return false;
             if (window.__parkingParkChirpTimesDone) return false;
-            var dates = parkChirpDateList();
-            if (!dates.length) {
+            var candidates = parkChirpCandidateList();
+            if (!candidates.length) {
               window.__parkingParkChirpTimesDone = true;
               return false;
             }
             var attempt = window.__parkingParkChirpDateAttempt | 0;
-            var phase = window.__parkingParkChirpPhase || null;
-            var settleMs = 1800;
-            var p = parkChirpPickers();
-            if (!p.sd || !p.st || !p.ed || !p.et || !p.sd.options.length) return false;
+            var settleMs = 2000;
 
-            // Settle after setting date — then pick times from refreshed options.
-            if (phase === 'dateSettle') {
-              if ((Date.now() - (window.__parkingParkChirpSettleAt || 0)) < settleMs) return false;
-              var dateStr = dates[attempt];
-              if (!dateStr || !parkChirpHasOption(p.sd, dateStr)) {
-                window.__parkingParkChirpPhase = null;
-                window.__parkingParkChirpSettleAt = null;
-                window.__parkingParkChirpDateAttempt = attempt + 1;
+            // After an apply, wait for SPA rewrite, then accept or advance.
+            if (window.__parkingParkChirpSettleAt) {
+              if ((Date.now() - window.__parkingParkChirpSettleAt) < settleMs) {
                 return false;
               }
-              var startTime = parkChirpEarliestStartAtOrAfter(p.st, '17:30');
-              if (!startTime) {
-                window.__parkingParkChirpPhase = null;
-                window.__parkingParkChirpSettleAt = null;
-                window.__parkingParkChirpDateAttempt = attempt + 1;
-                return false;
-              }
-              parkChirpSetSelect(p.sd, dateStr);
-              parkChirpSetSelect(p.st, startTime);
-              // End options often refresh after start time — re-read pickers.
-              p = parkChirpPickers();
-              var endTime = parkChirpEndSlot(p.et);
-              if (!endTime || startTime >= endTime) {
-                window.__parkingParkChirpPhase = null;
-                window.__parkingParkChirpSettleAt = null;
-                window.__parkingParkChirpDateAttempt = attempt + 1;
-                return false;
-              }
-              parkChirpSetSelect(p.ed, dateStr);
-              parkChirpSetSelect(p.et, endTime);
-              var startSec = parkChirpUnixFromWallParts(dateStr, startTime);
-              var endSec = parkChirpUnixFromWallParts(dateStr, endTime);
-              if (startSec && endSec) restoreParkChirpUrlTimes(startSec, endSec);
-              window.__parkingParkChirpWanted = {
-                date: dateStr, startTime: startTime, endTime: endTime,
-                startSec: startSec, endSec: endSec
-              };
-              window.__parkingParkChirpPhase = 'timeSettle';
-              window.__parkingParkChirpSettleAt = Date.now();
-              return true;
-            }
-
-            // Settle after setting times — accept as-is or advance date.
-            if (phase === 'timeSettle') {
-              if ((Date.now() - (window.__parkingParkChirpSettleAt || 0)) < settleMs) return false;
-              if (parkChirpWindowAccepted(window.__parkingParkChirpWanted)) {
+              var pending = candidates[attempt];
+              if (pending && parkChirpWindowAccepted(pending.startSec | 0, pending.endSec | 0)) {
                 window.__parkingParkChirpTimesDone = true;
-                window.__parkingParkChirpPhase = null;
                 window.__parkingParkChirpSettleAt = null;
                 return false;
               }
-              window.__parkingParkChirpPhase = null;
+              // Force-rewritten (or not sticky) → next future date.
               window.__parkingParkChirpSettleAt = null;
-              window.__parkingParkChirpWanted = null;
               window.__parkingParkChirpDateAttempt = attempt + 1;
               attempt = window.__parkingParkChirpDateAttempt;
             }
 
-            while (attempt < dates.length) {
-              var d = dates[attempt];
-              if (!parkChirpHasOption(p.sd, d)) {
+            while (attempt < candidates.length) {
+              var c = candidates[attempt];
+              var startSec = c.startSec | 0;
+              var endSec = c.endSec | 0;
+              var result = parkChirpApplyCandidate(startSec, endSec);
+              if (result === 'wait') return false;
+              if (result === 'skip') {
                 attempt += 1;
                 window.__parkingParkChirpDateAttempt = attempt;
                 continue;
               }
-              parkChirpSetSelect(p.sd, d);
-              parkChirpSetSelect(p.ed, d);
+              // applied — wait for SPA settle on next pass.
               window.__parkingParkChirpDateAttempt = attempt;
-              window.__parkingParkChirpPhase = 'dateSettle';
               window.__parkingParkChirpSettleAt = Date.now();
+              window.__parkingParkChirpTimesAt = Date.now();
               return true;
             }
 

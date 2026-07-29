@@ -130,7 +130,7 @@ struct Garage: Identifiable, Codable, Equatable, Hashable {
         provider: .parkChirp,
         name: "1525 Harbor Blvd (ParkChirp)",
         address: "1525 Harbor Boulevard, Weehawken Township, NJ 07086",
-        notes: "Try today then +3 days: earliest start ≥ 5:30 PM → 11 PM slot. Sign in, then Checkout. Pull ticket; exit via intercom with Propark reservation."
+        notes: "Try today 5:30–11:00 starts → 11:30 end, then up to 3 future days if rewritten. Sign in, then Checkout. Pull ticket; exit via intercom with Propark reservation."
     )
 
     enum CodingKeys: String, CodingKey {
