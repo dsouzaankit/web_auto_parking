@@ -376,12 +376,18 @@ enum LANLogServer {
           .muted { color: #9a9a9a; }
           pre { white-space: pre-wrap; word-break: break-word; background: #1a1a1a; padding: 1rem; border-radius: 8px; max-height: 70vh; overflow: auto; }
           h1 { font-size: 1.15rem; font-weight: 600; }
+          .toolbar { margin: 0.75rem 0 1rem; }
+          .toolbar a {
+            display: inline-block; padding: 0.45rem 0.9rem; background: #2a2a2a; color: #e8e8e8;
+            text-decoration: none; border-radius: 6px; border: 1px solid #444;
+          }
+          .toolbar a:hover { background: #333; }
         </style>
-        <meta http-equiv="refresh" content="5"/>
         </head><body>
         <h1>Parking — LAN logs</h1>
-        <p class="muted">Port \(defaultPort) · auto-refresh 5s · plain text: <a href="/logs.txt">/logs.txt</a></p>
+        <p class="muted">Port \(defaultPort) · plain text: <a href="/logs.txt">/logs.txt</a></p>
         <p>IP: <code>\(ipLine)</code><br/>mDNS: <code>\(hostLine)</code></p>
+        <p class="toolbar"><a href="/">Refresh</a></p>
         <pre id="log">\(log)</pre>
         </body></html>
         """
