@@ -837,32 +837,58 @@ enum BookingFormPrefill {
             return false;
           }
 
-          function parkChirpLoginFieldsFilled() {
+          function parkChirpFindLoginFields() {
             var pass = null;
             var passes = document.querySelectorAll('input[type=\"password\"]');
             for (var i = 0; i < passes.length; i++) {
-              if (visible(passes[i]) && (passes[i].value || '').length > 0) {
-                pass = passes[i];
-                break;
-              }
+              if (visible(passes[i])) { pass = passes[i]; break; }
             }
             if (!pass) return null;
             var email = null;
-            var root = pass.form || pass.closest('form') || pass.parentElement;
-            var inputs = (root || document).querySelectorAll('input[type=\"email\"], input[type=\"text\"], input:not([type])');
+            var root = pass.form || pass.closest('form') || pass.parentElement || document;
+            var inputs = root.querySelectorAll('input[type=\"email\"], input[type=\"text\"], input:not([type])');
             for (var j = 0; j < inputs.length; j++) {
               var el = inputs[j];
               if (!visible(el)) continue;
               var key = classify(el);
               var looksEmail = key === 'email' || /email/i.test(el.name || '') || /email/i.test(el.id || '')
-                || /email/i.test(el.placeholder || '');
-              if (looksEmail && (el.value || '').indexOf('@') !== -1) {
-                email = el;
-                break;
-              }
+                || /email/i.test(el.placeholder || '') || /username/i.test(el.autocomplete || '');
+              if (looksEmail) { email = el; break; }
             }
-            if (!email) return null;
             return { email: email, password: pass, form: pass.form || null };
+          }
+
+          /// Hint iOS Password AutoFill toward saved parkchirp.com credentials (QuickType / key icon).
+          /// Fields already use autocomplete=username/current-password; focus surfaces the suggestions.
+          function hintParkChirpPasswordAutofill() {
+            if (!isParkChirp() || parkChirpIsSignedIn()) return false;
+            if (window.__parkingParkChirpAutofillHint) return false;
+            var fields = parkChirpFindLoginFields();
+            if (!fields || !fields.password) return false;
+            try {
+              if (fields.email) {
+                fields.email.setAttribute('autocomplete', 'username');
+                fields.email.setAttribute('autocapitalize', 'none');
+                fields.email.setAttribute('autocorrect', 'off');
+                fields.email.setAttribute('spellcheck', 'false');
+              }
+              fields.password.setAttribute('autocomplete', 'current-password');
+              var target = fields.email || fields.password;
+              try { target.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
+              try { target.focus(); } catch (e) {}
+              try { target.click(); } catch (e) {}
+              window.__parkingParkChirpAutofillHint = true;
+              return true;
+            } catch (e) {
+              return false;
+            }
+          }
+
+          function parkChirpLoginFieldsFilled() {
+            var fields = parkChirpFindLoginFields();
+            if (!fields || !fields.password || !(fields.password.value || '').length) return null;
+            if (!fields.email || (fields.email.value || '').indexOf('@') === -1) return null;
+            return fields;
           }
 
           function findParkChirpLoginSubmit(fields) {
@@ -1024,6 +1050,9 @@ enum BookingFormPrefill {
               return { status: 'advanced', filled: 0, action: 'loginSubmit' };
             }
             if (parkChirpNeedsSignIn() || !parkChirpIsSignedIn()) {
+              if (hintParkChirpPasswordAutofill()) {
+                return { status: 'advanced', filled: 0, action: 'autofillHint' };
+              }
               return { status: 'waiting', filled: 0, action: 'awaitSignIn' };
             }
             var filled = 0;
