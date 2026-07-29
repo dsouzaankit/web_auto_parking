@@ -901,11 +901,71 @@ enum BookingFormPrefill {
             return false;
           }
 
+          function parkChirpPad2(n) {
+            return (n < 10 ? '0' : '') + n;
+          }
+
+          /// Wall-as-UTC unix in the URL → local wall yyyy-MM-dd / HH:mm for ParkChirp selects.
+          function parkChirpWallPartsFromUnix(sec) {
+            var d = new Date(sec * 1000);
+            return {
+              date: d.getUTCFullYear() + '-' + parkChirpPad2(d.getUTCMonth() + 1) + '-' + parkChirpPad2(d.getUTCDate()),
+              time: parkChirpPad2(d.getUTCHours()) + ':' + parkChirpPad2(d.getUTCMinutes())
+            };
+          }
+
+          function parkChirpSetSelect(el, val) {
+            if (!el || !val) return false;
+            var ok = false;
+            for (var i = 0; i < el.options.length; i++) {
+              if (el.options[i].value === val) { ok = true; break; }
+            }
+            if (!ok) return false;
+            if (el.value === val) return false;
+            el.value = val;
+            try {
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              if (window.jQuery) jQuery(el).trigger('change');
+            } catch (e) {}
+            return true;
+          }
+
+          /// Force Start/End Date + Time dropdowns to match deep-link window (today 5:30–11:30 PM).
+          function applyParkChirpUrlDatesAndTimes() {
+            if (!isParkChirp()) return false;
+            if (window.__parkingParkChirpTimesAt && (Date.now() - window.__parkingParkChirpTimesAt) < 4000) {
+              return false;
+            }
+            var u;
+            try { u = new URL(location.href); } catch (e) { return false; }
+            var startSec = parseInt(u.searchParams.get('startTime') || '', 10);
+            var endSec = parseInt(u.searchParams.get('endTime') || '', 10);
+            if (!startSec || !endSec) return false;
+            var start = parkChirpWallPartsFromUnix(startSec);
+            var end = parkChirpWallPartsFromUnix(endSec);
+            var sd = document.querySelector('select[name=\"start-date\"]');
+            var st = document.querySelector('select[name=\"start-time\"]');
+            var ed = document.querySelector('select[name=\"end-date\"]');
+            var et = document.querySelector('select[name=\"end-time\"]');
+            if (!sd || !st || !ed || !et) return false;
+            var changed = false;
+            if (parkChirpSetSelect(sd, start.date)) changed = true;
+            if (parkChirpSetSelect(st, start.time)) changed = true;
+            if (parkChirpSetSelect(ed, end.date)) changed = true;
+            if (parkChirpSetSelect(et, end.time)) changed = true;
+            if (changed) window.__parkingParkChirpTimesAt = Date.now();
+            return changed;
+          }
+
           // ParkChirp: wait for account sign-in; never guest, never tap Checkout.
           function advanceParkChirp() {
             if (!isParkChirp()) return null;
             if (dismissCookieBanner()) {
               return { status: 'advanced', filled: 0, action: 'cookie' };
+            }
+            if (applyParkChirpUrlDatesAndTimes()) {
+              return { status: 'advanced', filled: 0, action: 'setTimes' };
             }
             if (submitParkChirpLoginIfAutofilled()) {
               return { status: 'advanced', filled: 0, action: 'loginSubmit' };
@@ -915,6 +975,10 @@ enum BookingFormPrefill {
             }
             if (!parkChirpIsSignedIn()) {
               return { status: 'waiting', filled: 0, action: 'awaitSignIn' };
+            }
+            // Re-apply after login in case the SPA reset the pickers.
+            if (applyParkChirpUrlDatesAndTimes()) {
+              return { status: 'advanced', filled: 0, action: 'setTimes' };
             }
             var filled = 0;
             // Prefer configured plate when several radios exist.
