@@ -975,17 +975,14 @@ enum BookingFormPrefill {
             } catch (e) { return false; }
           }
 
-          /// Force Start/End Time to locked window. Date = app day when selectable, else earliest picker day.
+          /// Force Start/End Date + Time once. Date = app day when selectable, else earliest picker day.
           /// Never replaceState to a date missing from the dropdown (that blanks selects / fights SPA).
           function applyParkChirpUrlDatesAndTimes() {
             if (!isParkChirp()) return false;
+            if (window.__parkingParkChirpTimesDone) return false;
             var startSec = cfg.parkChirpStartSec | 0;
             var endSec = cfg.parkChirpEndSec | 0;
             if (!startSec || !endSec) return false;
-            if (window.__parkingParkChirpTimesDone) return false;
-            if (window.__parkingParkChirpTimesAt && (Date.now() - window.__parkingParkChirpTimesAt) < 2000) {
-              return false;
-            }
             var start = parkChirpWallPartsFromUnix(startSec);
             var end = parkChirpWallPartsFromUnix(endSec);
             var sd = document.querySelector('select[name=\"start-date\"]');
@@ -999,59 +996,35 @@ enum BookingFormPrefill {
             var endDate = parkChirpResolveDate(ed, end.date);
             if (start.date === end.date) endDate = startDate;
 
-            // Already showing correct clock times on an available date — stop fighting.
-            if (sd.value === startDate && st.value === start.time
-                && ed.value === endDate && et.value === end.time) {
-              var okStart = parkChirpUnixFromWallParts(startDate, start.time);
-              var okEnd = parkChirpUnixFromWallParts(endDate, end.time);
-              if (okStart && okEnd) restoreParkChirpUrlTimes(okStart, okEnd);
-              window.__parkingParkChirpTimesDone = true;
-              return false;
-            }
-
             var changed = false;
-            if (parkChirpSetSelect(sd, startDate)) changed = true;
-            if (parkChirpSetSelect(st, start.time)) changed = true;
-            if (parkChirpSetSelect(ed, endDate)) changed = true;
-            if (parkChirpSetSelect(et, end.time)) changed = true;
+            if (sd.value !== startDate && parkChirpSetSelect(sd, startDate)) changed = true;
+            if (st.value !== start.time && parkChirpSetSelect(st, start.time)) changed = true;
+            if (ed.value !== endDate && parkChirpSetSelect(ed, endDate)) changed = true;
+            if (et.value !== end.time && parkChirpSetSelect(et, end.time)) changed = true;
 
             var appliedStart = parkChirpUnixFromWallParts(startDate, start.time);
             var appliedEnd = parkChirpUnixFromWallParts(endDate, end.time);
-            var urlFixed = false;
             if (appliedStart && appliedEnd) {
-              urlFixed = restoreParkChirpUrlTimes(appliedStart, appliedEnd);
+              restoreParkChirpUrlTimes(appliedStart, appliedEnd);
             }
-            if (!changed && !urlFixed) return false;
+            // Exactly once at end of flow — do not keep re-fighting the SPA.
+            window.__parkingParkChirpTimesDone = true;
             window.__parkingParkChirpTimesAt = Date.now();
-            // One successful apply is enough; SPA may roll date once — we already used available date.
-            if (sd.value === startDate && st.value === start.time
-                && ed.value === endDate && et.value === end.time) {
-              window.__parkingParkChirpTimesDone = true;
-            }
             return true;
           }
 
           // ParkChirp: wait for account sign-in; never guest, never tap Checkout.
+          // Dates/hours are set once at the very end (after sign-in + plate).
           function advanceParkChirp() {
             if (!isParkChirp()) return null;
             if (dismissCookieBanner()) {
               return { status: 'advanced', filled: 0, action: 'cookie' };
             }
-            if (applyParkChirpUrlDatesAndTimes()) {
-              return { status: 'advanced', filled: 0, action: 'setTimes' };
-            }
             if (submitParkChirpLoginIfAutofilled()) {
               return { status: 'advanced', filled: 0, action: 'loginSubmit' };
             }
-            if (parkChirpNeedsSignIn()) {
+            if (parkChirpNeedsSignIn() || !parkChirpIsSignedIn()) {
               return { status: 'waiting', filled: 0, action: 'awaitSignIn' };
-            }
-            if (!parkChirpIsSignedIn()) {
-              return { status: 'waiting', filled: 0, action: 'awaitSignIn' };
-            }
-            // Re-apply after login in case the SPA reset the pickers.
-            if (applyParkChirpUrlDatesAndTimes()) {
-              return { status: 'advanced', filled: 0, action: 'setTimes' };
             }
             var filled = 0;
             // Prefer configured plate when several radios exist.
@@ -1070,10 +1043,15 @@ enum BookingFormPrefill {
                 }
               }
             }
-            // Ready for the user to tap Checkout (payment left to them).
-            // Stay on waiting so retries keep re-forcing times if the SPA rewrites again.
+            // Very end: force Start/End Date + Time once, then stop.
+            if (!window.__parkingParkChirpTimesDone) {
+              if (applyParkChirpUrlDatesAndTimes()) {
+                return { status: 'advanced', filled: filled, action: 'setTimes' };
+              }
+              return { status: 'waiting', filled: filled, action: 'parkChirpTimesPending' };
+            }
             if (document.querySelector('#gpi-checkout-submit')) {
-              return { status: 'waiting', filled: filled, action: 'awaitCheckout' };
+              return { status: 'filled', filled: filled, action: 'awaitCheckout' };
             }
             return { status: 'waiting', filled: filled, action: 'parkChirpMount' };
           }
