@@ -21,7 +21,7 @@ On checkout / login-to-checkout pages (not Find search), the WebView will:
 
 | Step | ParkMobile | SpotHero | ParkChirp |
 |------|------------|----------|-----------|
-| Start booking | Open checkout with session window (Z-stamped times; skips Reserve race) | Facility purchase URL opens checkout | Hourly checkout deep link (**locked 5:30–11:30 PM**) |
+| Start booking | Open checkout with session window (Z-stamped times; skips Reserve race) | Facility purchase URL opens checkout | Hourly checkout deep link (**before 6 PM: 5:30–11:30; after 6 PM: −30m→11:30**) |
 | Auth | **Continue as a Guest** | Guest checkout by default | **Wait for sign-in**; if email+password are filled (e.g. Password AutoFill), tap **Login Submit** once — never Sign in with Apple / SSO |
 | Contact | Fill email / phone → **Save & Continue** | Fill email / phone → **Continue** | Account fields already on file after login |
 | Vehicle | Fill `#vrn` plate, country, state → **Save & Continue** | Tap **Add** → select **Make and Model** → plate + state → **Confirm** | Select matching plate radio if configured |
@@ -33,7 +33,7 @@ On checkout / login-to-checkout pages (not Find search), the WebView will:
 - **ParkMobile time quirk:** their checkout builder takes UTC clock hours then appends the local offset, so a real `09:45-04:00` becomes `13:45-04:00` (start jumps to the old end / 1:45 PM). We open `/checkout/reservation/…` directly with local wall times stamped as `Z` (e.g. `09:45:00Z`) so their UTC getters keep the ASAP hour. Do not switch back to naive/`-04:00` `startDate`+Reserve without retesting.
 - **Lincoln Harbor evening package:** [1525 Harbor Garage](https://app.parkmobile.io/reservation/62713) (`62713`) often rewrites evening ASAP/−15m/−30m 3–6h windows into a fixed **~5:30 PM → 12:30 AM (7h)** rate package. Z-stamped checkout still works (no UTC hour jump); Bisby keeps the requested window. This is ParkMobile’s rate packaging for that facility, not an app start-mode bug.
 - **ParkChirp time quirk:** deep-link `startTime`/`endTime` are unix seconds. If you pass a real Eastern epoch, their GUI shows **UTC clock hours as local** (e.g. 5:30 PM EDT → **9:30 PM**). Same class of bug as ParkMobile. We stamp **local wall clock as if UTC** (`SessionWindow.unixParkChirpWallSeconds`) so 5:30 PM stays 5:30 PM. Do not switch to real EDT timestamps without retesting.
-- **ParkChirp Harbor lock:** [1525 Harbor Blvd](https://parkchirp.com/facilities/1525-harbor-blvd/) (`1525-harbor-blvd`, facility `96657`) always opens **today 5:30 PM → 11:30 PM** (Session ASAP/−15m/−30m and 3–6h duration are ignored). Their SPA often rewrites the deep-link within ~1s to a wrong overnight window (e.g. midnight→11:30 PM next day). Prefill ignores URL `startTime`/`endTime` after load and forces the locked window into **Start/End Date + Time** plus `history.replaceState` (`action":"setTimes"`). Pickers are **:00/:30** only. Automation waits for login (`awaitSignIn` / `loginSubmit`) and stops at **Checkout**; saved-card charge has returned payment-processor **HTTP 500** (“Error occurred while processing your card”) in PC testing — treat purchase as manual.
+- **ParkChirp Harbor lock:** [1525 Harbor Blvd](https://parkchirp.com/facilities/1525-harbor-blvd/) (`1525-harbor-blvd`, facility `96657`) ignores Session ASAP/−15m/−30m and 3–6h duration. **Before 6:00 PM:** **5:30 PM → 11:30 PM**. **At/after 6:00 PM:** start = last :30 mark (−30m), end **11:30 PM** (past 11:30 → next day 5:30–11:30). Their SPA often rewrites a past/invalid deep-link within ~1s to an overnight package (e.g. midnight→11:30 PM next day, `$30`). Prefill ignores URL `startTime`/`endTime` after load and forces the locked window into **Start/End Date + Time** plus `history.replaceState` (`action":"setTimes"`). Pickers are **:00/:30** only. Automation waits for login (`awaitSignIn` / `loginSubmit`) and stops at **Checkout**; saved-card charge has returned payment-processor **HTTP 500** (“Error occurred while processing your card”) in PC testing — treat purchase as manual.
 
 `sessionDurationHours` may be `3`, `4`, `5`, or `6` (fixed-duration locked window; **not** used by ParkChirp Harbor). The Garages tab also has a **3h / 4h / 5h / 6h** control that overrides this at runtime for ParkMobile fixed lots.
 
@@ -52,7 +52,7 @@ Useful log lines: `Prefill inject`, `Prefill JS {"status":"advanced|filled|waiti
 | **Fixed duration** | [1525 Harbor Garage](https://app.parkmobile.io/reservation/62713) | `/checkout/reservation/{id}?start_at=…Z&stop_at=…Z` (**3–6h** locked) |
 | **Fixed duration** | [(SP+) The Bisby Garage](https://app.parkmobile.io/reservation/59277) | same (vehicle plate required) |
 | **Flexible** | [29245 Mall Dr. E](https://spothero.com/purchase/hourly?facility=131895) | `/purchase/hourly?facility={id}&starts=…` (**no `ends`** — free extra time kept) |
-| **ParkChirp** | [1525 Harbor Blvd](https://parkchirp.com/facilities/1525-harbor-blvd/?checkout=true&type=hourly) | `/facilities/{slug}/?checkout=true&type=hourly&startTime=…&endTime=…` (unix **wall-as-UTC**; **locked 5:30–11:30 PM** — list tag **Fixed duration**; **sign-in required**) |
+| **ParkChirp** | [1525 Harbor Blvd](https://parkchirp.com/facilities/1525-harbor-blvd/?checkout=true&type=hourly) | `/facilities/{slug}/?checkout=true&type=hourly&startTime=…&endTime=…` (unix **wall-as-UTC**; **before 6p: 5:30–11:30 / after 6p: −30m→11:30** — list tag **Fixed duration**; **sign-in required**) |
 
 Presets above are saved by default (existing installs pick up missing ones on next launch; ParkChirp Harbor is listed first).
 
@@ -60,9 +60,9 @@ Presets above are saved by default (existing installs pick up missing ones on ne
 
 | Setting | Fixed duration (ParkMobile) | Flexible (SpotHero) | ParkChirp Harbor |
 |---------|----------------------------|---------------------|------------------|
-| **Start** | **Last 15m** (or ASAP / last 30m) | Same | **5:30 PM** (locked) |
-| **Duration** | Global **3–6h** (config + in-app toggle) | Not forced — may add **free extra time** | **6h** implied by lock |
-| **End** | Start + duration | Omitted so the rate package can extend | **11:30 PM** (locked) |
+| **Start** | **Last 15m** (or ASAP / last 30m) | Same | **Before 6 PM: 5:30 PM**; **after 6 PM: −30m** |
+| **Duration** | Global **3–6h** (config + in-app toggle) | Not forced — may add **free extra time** | End locked at 11:30 PM |
+| **End** | Start + duration | Omitted so the rate package can extend | **11:30 PM** (same day; next day if past) |
 
 ## Tabs
 

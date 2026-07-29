@@ -952,7 +952,7 @@ enum BookingFormPrefill {
             } catch (e) { return false; }
           }
 
-          /// Force Start/End Date + Time to locked window from app (today 5:30–11:30 PM).
+          /// Force Start/End Date + Time to locked window from app (5:30→11:30 or −30m→11:30).
           /// Do NOT read location.search — ParkChirp rewrites start/end to a wrong overnight package.
           function applyParkChirpUrlDatesAndTimes() {
             if (!isParkChirp()) return false;

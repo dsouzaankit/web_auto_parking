@@ -172,14 +172,35 @@ enum SessionWindow {
         }
     }
 
-    /// Fixed ParkChirp Harbor evening window: 5:30 PM → 11:30 PM on `date`'s calendar day.
+    /// ParkChirp Harbor evening window (ignores Session ASAP/−15m/−30m UI).
+    /// - Before 6:00 PM: start **5:30 PM**, end **11:30 PM** (same calendar day).
+    /// - At/after 6:00 PM: start = last :30 mark (−30m), end **11:30 PM** same day.
+    /// - If start would be at/after end (past 11:30 PM): next day **5:30 PM → 11:30 PM**.
     static func parkChirpLockedEveningWindow(
         on date: Date = .now,
         calendar: Calendar = .current
     ) -> (start: Date, end: Date) {
-        let start = calendar.date(bySettingHour: 17, minute: 30, second: 0, of: date) ?? date
-        let end = calendar.date(bySettingHour: 23, minute: 30, second: 0, of: date) ?? start
-        return (start, end)
+        let sixPM = calendar.date(bySettingHour: 18, minute: 0, second: 0, of: date) ?? date
+        let fiveThirty = calendar.date(bySettingHour: 17, minute: 30, second: 0, of: date) ?? date
+        let elevenThirty = calendar.date(bySettingHour: 23, minute: 30, second: 0, of: date) ?? date
+
+        let start: Date
+        if date < sixPM {
+            start = fiveThirty
+        } else {
+            start = previousMinuteMark(atOrBefore: date, interval: 30, calendar: calendar)
+        }
+
+        if start < elevenThirty {
+            return (start, elevenThirty)
+        }
+
+        guard let nextDay = calendar.date(byAdding: .day, value: 1, to: date) else {
+            return (fiveThirty, elevenThirty)
+        }
+        let nextStart = calendar.date(bySettingHour: 17, minute: 30, second: 0, of: nextDay) ?? nextDay
+        let nextEnd = calendar.date(bySettingHour: 23, minute: 30, second: 0, of: nextDay) ?? nextStart
+        return (nextStart, nextEnd)
     }
 
     static func displayRange(
