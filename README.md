@@ -17,7 +17,7 @@ Use **ISO-style codes** for selects when possible (`country`: `US`, `state`: `NJ
 
 ### What automation does
 
-On checkout / login-to-checkout pages (not Find search), the WebView will:
+On checkout / login-to-checkout pages, the WebView will:
 
 | Step | ParkMobile | SpotHero | ParkChirp |
 |------|------------|----------|-----------|
@@ -71,7 +71,6 @@ Presets above are saved by default (existing installs pick up missing ones on ne
 | Tab | Behavior |
 |-----|----------|
 | **Garages** | Saved facilities → provider checkout (main automation path) |
-| **Find** | ParkMobile / SpotHero search (segmented); prefill skipped until checkout |
 
 ## Build & install (no Mac)
 

@@ -22,7 +22,7 @@ struct ParkingWebView: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            // Keep controls in the nav bar — a .bottomBar sits behind/under the TabView tab bar.
+            // Keep controls in the nav bar (not a bottom toolbar).
             // Trailing only so a pushed garage screen still has room for the system Back.
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button {

@@ -176,9 +176,6 @@ struct Garage: Identifiable, Codable, Equatable, Hashable {
 }
 
 enum FixedDurationURLs {
-    static let search = URL(string: "https://app.parkmobile.io/search")!
-    static let home = URL(string: "https://app.parkmobile.io/")!
-
     static func reservation(
         id: String,
         start: Date? = nil,
