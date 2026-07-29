@@ -937,7 +937,30 @@ enum BookingFormPrefill {
             return true;
           }
 
-          /// Restore locked startTime/endTime in the address bar after ParkChirp SPA rewrite.
+          function parkChirpHasOption(el, val) {
+            if (!el || val == null || val === '') return false;
+            for (var i = 0; i < el.options.length; i++) {
+              if (el.options[i].value === val) return true;
+            }
+            return false;
+          }
+
+          /// If wantDate is missing (e.g. today dropped from picker), use first available option.
+          function parkChirpResolveDate(el, wantDate) {
+            if (parkChirpHasOption(el, wantDate)) return wantDate;
+            if (el && el.options && el.options.length) return el.options[0].value;
+            return wantDate;
+          }
+
+          function parkChirpUnixFromWallParts(dateStr, timeStr) {
+            var dp = String(dateStr || '').split('-');
+            var tp = String(timeStr || '').split(':');
+            if (dp.length < 3 || tp.length < 2) return 0;
+            var ms = Date.UTC(+dp[0], +dp[1] - 1, +dp[2], +tp[0], +tp[1], 0);
+            return Math.floor(ms / 1000);
+          }
+
+          /// Restore startTime/endTime in the address bar to match what we can actually select.
           function restoreParkChirpUrlTimes(startSec, endSec) {
             try {
               var u = new URL(location.href);
@@ -952,32 +975,59 @@ enum BookingFormPrefill {
             } catch (e) { return false; }
           }
 
-          /// Force Start/End Date + Time to locked window from app (5:30→11:30 or −30m→11:30).
-          /// Do NOT read location.search — ParkChirp rewrites start/end to a wrong overnight package.
+          /// Force Start/End Time to locked window. Date = app day when selectable, else earliest picker day.
+          /// Never replaceState to a date missing from the dropdown (that blanks selects / fights SPA).
           function applyParkChirpUrlDatesAndTimes() {
             if (!isParkChirp()) return false;
             var startSec = cfg.parkChirpStartSec | 0;
             var endSec = cfg.parkChirpEndSec | 0;
             if (!startSec || !endSec) return false;
-            if (window.__parkingParkChirpTimesAt && (Date.now() - window.__parkingParkChirpTimesAt) < 1500) {
+            if (window.__parkingParkChirpTimesDone) return false;
+            if (window.__parkingParkChirpTimesAt && (Date.now() - window.__parkingParkChirpTimesAt) < 2000) {
               return false;
             }
             var start = parkChirpWallPartsFromUnix(startSec);
             var end = parkChirpWallPartsFromUnix(endSec);
-            var urlFixed = restoreParkChirpUrlTimes(startSec, endSec);
             var sd = document.querySelector('select[name=\"start-date\"]');
             var st = document.querySelector('select[name=\"start-time\"]');
             var ed = document.querySelector('select[name=\"end-date\"]');
             var et = document.querySelector('select[name=\"end-time\"]');
-            if (!sd || !st || !ed || !et) return urlFixed;
-            var changed = urlFixed;
-            if (parkChirpSetSelect(sd, start.date)) changed = true;
+            // Wait for pickers — do not touch URL until we can set selects.
+            if (!sd || !st || !ed || !et || !sd.options.length) return false;
+
+            var startDate = parkChirpResolveDate(sd, start.date);
+            var endDate = parkChirpResolveDate(ed, end.date);
+            if (start.date === end.date) endDate = startDate;
+
+            // Already showing correct clock times on an available date — stop fighting.
+            if (sd.value === startDate && st.value === start.time
+                && ed.value === endDate && et.value === end.time) {
+              var okStart = parkChirpUnixFromWallParts(startDate, start.time);
+              var okEnd = parkChirpUnixFromWallParts(endDate, end.time);
+              if (okStart && okEnd) restoreParkChirpUrlTimes(okStart, okEnd);
+              window.__parkingParkChirpTimesDone = true;
+              return false;
+            }
+
+            var changed = false;
+            if (parkChirpSetSelect(sd, startDate)) changed = true;
             if (parkChirpSetSelect(st, start.time)) changed = true;
-            if (parkChirpSetSelect(ed, end.date)) changed = true;
+            if (parkChirpSetSelect(ed, endDate)) changed = true;
             if (parkChirpSetSelect(et, end.time)) changed = true;
-            // Already correct — do not keep reporting setTimes forever.
-            if (!changed) return false;
+
+            var appliedStart = parkChirpUnixFromWallParts(startDate, start.time);
+            var appliedEnd = parkChirpUnixFromWallParts(endDate, end.time);
+            var urlFixed = false;
+            if (appliedStart && appliedEnd) {
+              urlFixed = restoreParkChirpUrlTimes(appliedStart, appliedEnd);
+            }
+            if (!changed && !urlFixed) return false;
             window.__parkingParkChirpTimesAt = Date.now();
+            // One successful apply is enough; SPA may roll date once — we already used available date.
+            if (sd.value === startDate && st.value === start.time
+                && ed.value === endDate && et.value === end.time) {
+              window.__parkingParkChirpTimesDone = true;
+            }
             return true;
           }
 
