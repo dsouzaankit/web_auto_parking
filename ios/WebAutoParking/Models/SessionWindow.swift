@@ -172,18 +172,48 @@ enum SessionWindow {
         }
     }
 
-    /// ParkChirp Harbor evening window: **5:30 PM → 11:30 PM** on `date`'s calendar day.
-    /// Prefill may walk today + next 3 days until the SPA accepts a candidate.
+    /// Fixed ParkChirp evening on a calendar day: **5:30 PM → 11:30 PM**.
+    static func parkChirpFixedEvening(
+        on day: Date,
+        calendar: Calendar = .current
+    ) -> (start: Date, end: Date) {
+        let start = calendar.date(bySettingHour: 17, minute: 30, second: 0, of: day) ?? day
+        let end = calendar.date(bySettingHour: 23, minute: 30, second: 0, of: day) ?? start
+        return (start, end)
+    }
+
+    /// Today's ParkChirp window: **5:30→11:30** until 5:30 PM; after that, earliest :30 start → **11:30 PM**.
+    /// Returns nil when no room left before 11:30 (caller walks future days).
+    static func parkChirpTodayWindow(
+        on date: Date = .now,
+        calendar: Calendar = .current
+    ) -> (start: Date, end: Date)? {
+        let fiveThirty = calendar.date(bySettingHour: 17, minute: 30, second: 0, of: date) ?? date
+        let elevenThirty = calendar.date(bySettingHour: 23, minute: 30, second: 0, of: date) ?? date
+        let start: Date
+        if date <= fiveThirty {
+            start = fiveThirty
+        } else {
+            // After 5:30 PM: earliest bookable :30 slot at or after now.
+            start = nextMinuteMark(atOrAfter: date, interval: 30, calendar: calendar)
+        }
+        guard start < elevenThirty else { return nil }
+        return (start, elevenThirty)
+    }
+
+    /// Deep-link / list helper: today window if bookable, else next day's fixed 5:30–11:30.
     static func parkChirpLockedEveningWindow(
         on date: Date = .now,
         calendar: Calendar = .current
     ) -> (start: Date, end: Date) {
-        let start = calendar.date(bySettingHour: 17, minute: 30, second: 0, of: date) ?? date
-        let end = calendar.date(bySettingHour: 23, minute: 30, second: 0, of: date) ?? start
-        return (start, end)
+        if let today = parkChirpTodayWindow(on: date, calendar: calendar) {
+            return today
+        }
+        let nextDay = calendar.date(byAdding: .day, value: 1, to: date) ?? date
+        return parkChirpFixedEvening(on: nextDay, calendar: calendar)
     }
 
-    /// Today + next `futureDays` evenings at 5:30→11:30 (deep-link / setTimes candidates).
+    /// Today (5:30 or earliest after 5:30) + next `futureDays` fixed 5:30→11:30 evenings.
     static func parkChirpEveningCandidates(
         on date: Date = .now,
         calendar: Calendar = .current,
@@ -191,9 +221,12 @@ enum SessionWindow {
     ) -> [(start: Date, end: Date)] {
         let days = max(futureDays, 0)
         var out: [(start: Date, end: Date)] = []
-        for offset in 0...days {
+        if let today = parkChirpTodayWindow(on: date, calendar: calendar) {
+            out.append(today)
+        }
+        for offset in 1...days {
             guard let day = calendar.date(byAdding: .day, value: offset, to: date) else { continue }
-            out.append(parkChirpLockedEveningWindow(on: day, calendar: calendar))
+            out.append(parkChirpFixedEvening(on: day, calendar: calendar))
         }
         return out
     }

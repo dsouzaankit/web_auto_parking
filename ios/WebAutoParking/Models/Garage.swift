@@ -89,8 +89,9 @@ struct Garage: Identifiable, Codable, Equatable, Hashable {
                 calendar: calendar
             )
         case .parkChirp:
-            // Harbor ParkChirp: try today 5:30–11:30, then walk future evenings if SPA rewrites.
-            let window = SessionWindow.parkChirpLockedEveningWindow(on: date, calendar: calendar)
+            // Harbor: today 5:30–11:30 (or earliest start after 5:30); prefill walks future evenings if rewritten.
+            let window = SessionWindow.parkChirpEveningCandidates(on: date, calendar: calendar).first
+                ?? SessionWindow.parkChirpLockedEveningWindow(on: date, calendar: calendar)
             return ParkChirpURLs.hourlyCheckout(
                 facilitySlug: facilityID,
                 start: window.start,
@@ -130,7 +131,7 @@ struct Garage: Identifiable, Codable, Equatable, Hashable {
         provider: .parkChirp,
         name: "1525 Harbor Blvd (ParkChirp)",
         address: "1525 Harbor Boulevard, Weehawken Township, NJ 07086",
-        notes: "Try today 5:30–11:30, then up to 3 future evenings if full/rewritten. Sign in, then Checkout. Pull ticket; exit via intercom with Propark reservation."
+        notes: "Today 5:30–11:30 (after 5:30: earliest start→11:30); walk up to 3 future evenings if rewritten. Sign in, then Checkout."
     )
 
     enum CodingKeys: String, CodingKey {
