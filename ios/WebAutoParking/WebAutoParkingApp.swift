@@ -6,6 +6,7 @@ struct WebAutoParkingApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
+        AppLog.clear()
         AppLog.ensureReady()
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"

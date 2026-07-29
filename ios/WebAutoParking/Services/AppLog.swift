@@ -31,6 +31,15 @@ enum AppLog {
         }
     }
 
+    /// Wipe in-memory buffer and on-disk log (call once at process start).
+    static func clear() {
+        queue.sync {
+            buffer = ""
+            ensureDirectoryLocked()
+            try? "".write(to: logURL, atomically: true, encoding: .utf8)
+        }
+    }
+
     static func log(_ message: String) {
         queue.sync {
             ensureDirectoryLocked()
