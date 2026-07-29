@@ -167,7 +167,7 @@ private struct GarageRow: View {
                     .font(.headline)
                     .foregroundStyle(.primary)
                 Spacer(minLength: 8)
-                Text(garage.provider.displayName)
+                Text(garage.provider.listTag)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }

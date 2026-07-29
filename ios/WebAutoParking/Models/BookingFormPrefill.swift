@@ -99,6 +99,10 @@ enum BookingFormPrefill {
         let state = jsonString(config.vehicle.normalizedState)
         let preferGuest = config.preferGuestCheckout ? "true" : "false"
         let payment = jsonString(config.prefersApplePay ? "applePay" : config.paymentMethod)
+        // Never trust ParkChirp's rewritten URL times — always force Harbor locked window.
+        let parkChirpWindow = SessionWindow.parkChirpLockedEveningWindow()
+        let parkChirpStartSec = SessionWindow.unixParkChirpWallSeconds(parkChirpWindow.start)
+        let parkChirpEndSec = SessionWindow.unixParkChirpWallSeconds(parkChirpWindow.end)
 
         // Intentionally conservative: no continuous MutationObserver (that looped on SPAs and crashed WKWebView).
         return """
@@ -112,7 +116,9 @@ enum BookingFormPrefill {
             country: \(country),
             state: \(state),
             preferGuestCheckout: \(preferGuest),
-            paymentMethod: \(payment)
+            paymentMethod: \(payment),
+            parkChirpStartSec: \(parkChirpStartSec),
+            parkChirpEndSec: \(parkChirpEndSec)
           };
 
           function norm(s) { return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ''); }
@@ -931,31 +937,48 @@ enum BookingFormPrefill {
             return true;
           }
 
-          /// Force Start/End Date + Time dropdowns to match deep-link window (today 5:30–11:30 PM).
+          /// Restore locked startTime/endTime in the address bar after ParkChirp SPA rewrite.
+          function restoreParkChirpUrlTimes(startSec, endSec) {
+            try {
+              var u = new URL(location.href);
+              var curStart = u.searchParams.get('startTime') || '';
+              var curEnd = u.searchParams.get('endTime') || '';
+              if (curStart === String(startSec) && curEnd === String(endSec)) return false;
+              u.searchParams.set('startTime', String(startSec));
+              u.searchParams.set('endTime', String(endSec));
+              u.searchParams.delete('expectedPrice');
+              history.replaceState(history.state, '', u.toString());
+              return true;
+            } catch (e) { return false; }
+          }
+
+          /// Force Start/End Date + Time to locked window from app (today 5:30–11:30 PM).
+          /// Do NOT read location.search — ParkChirp rewrites start/end to a wrong overnight package.
           function applyParkChirpUrlDatesAndTimes() {
             if (!isParkChirp()) return false;
-            if (window.__parkingParkChirpTimesAt && (Date.now() - window.__parkingParkChirpTimesAt) < 4000) {
+            var startSec = cfg.parkChirpStartSec | 0;
+            var endSec = cfg.parkChirpEndSec | 0;
+            if (!startSec || !endSec) return false;
+            if (window.__parkingParkChirpTimesAt && (Date.now() - window.__parkingParkChirpTimesAt) < 1500) {
               return false;
             }
-            var u;
-            try { u = new URL(location.href); } catch (e) { return false; }
-            var startSec = parseInt(u.searchParams.get('startTime') || '', 10);
-            var endSec = parseInt(u.searchParams.get('endTime') || '', 10);
-            if (!startSec || !endSec) return false;
             var start = parkChirpWallPartsFromUnix(startSec);
             var end = parkChirpWallPartsFromUnix(endSec);
+            var urlFixed = restoreParkChirpUrlTimes(startSec, endSec);
             var sd = document.querySelector('select[name=\"start-date\"]');
             var st = document.querySelector('select[name=\"start-time\"]');
             var ed = document.querySelector('select[name=\"end-date\"]');
             var et = document.querySelector('select[name=\"end-time\"]');
-            if (!sd || !st || !ed || !et) return false;
-            var changed = false;
+            if (!sd || !st || !ed || !et) return urlFixed;
+            var changed = urlFixed;
             if (parkChirpSetSelect(sd, start.date)) changed = true;
             if (parkChirpSetSelect(st, start.time)) changed = true;
             if (parkChirpSetSelect(ed, end.date)) changed = true;
             if (parkChirpSetSelect(et, end.time)) changed = true;
-            if (changed) window.__parkingParkChirpTimesAt = Date.now();
-            return changed;
+            // Already correct — do not keep reporting setTimes forever.
+            if (!changed) return false;
+            window.__parkingParkChirpTimesAt = Date.now();
+            return true;
           }
 
           // ParkChirp: wait for account sign-in; never guest, never tap Checkout.
@@ -998,8 +1021,9 @@ enum BookingFormPrefill {
               }
             }
             // Ready for the user to tap Checkout (payment left to them).
+            // Stay on waiting so retries keep re-forcing times if the SPA rewrites again.
             if (document.querySelector('#gpi-checkout-submit')) {
-              return { status: 'filled', filled: filled, action: 'awaitCheckout' };
+              return { status: 'waiting', filled: filled, action: 'awaitCheckout' };
             }
             return { status: 'waiting', filled: filled, action: 'parkChirpMount' };
           }

@@ -14,6 +14,14 @@ enum ParkingProvider: String, Codable, CaseIterable, Hashable {
         }
     }
 
+    /// Shown on garage rows (duration behavior), distinct from add-form `displayName`.
+    var listTag: String {
+        switch self {
+        case .fixedDuration, .parkChirp: return "Fixed duration"
+        case .flexibleDuration: return "Flexible"
+        }
+    }
+
     var idLabel: String {
         switch self {
         case .fixedDuration: return "Reservation ID"
