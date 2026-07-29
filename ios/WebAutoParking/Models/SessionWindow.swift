@@ -182,12 +182,12 @@ enum SessionWindow {
         return (start, end)
     }
 
-    /// Today + next `futureDays`: for each day, start at **5:30 / 6:00 / … / 11:00 PM**, end **11:30 PM**.
-    /// Prefill walks this list until the SPA accepts a window as-is.
+    /// Today through `current + futureDays` (default **+2**): for each day, start **5:30…11:00 PM**, end **11:30 PM**.
+    /// Prefill walks until the SPA accepts as-is, or the last day is exhausted — whichever is earlier.
     static func parkChirpEveningCandidates(
         on date: Date = .now,
         calendar: Calendar = .current,
-        futureDays: Int = 3
+        futureDays: Int = 2
     ) -> [(start: Date, end: Date)] {
         let days = max(futureDays, 0)
         // 5:30 PM through 11:00 PM inclusive, :30 steps.

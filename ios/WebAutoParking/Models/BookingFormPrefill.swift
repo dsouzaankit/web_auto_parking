@@ -99,7 +99,7 @@ enum BookingFormPrefill {
         let state = jsonString(config.vehicle.normalizedState)
         let preferGuest = config.preferGuestCheckout ? "true" : "false"
         let payment = jsonString(config.prefersApplePay ? "applePay" : config.paymentMethod)
-        // Today+3 days × 5:30…11:00 → 11:30 — prefill walks until SPA accepts as-is.
+        // Today…current+2 × 5:30…11:00 → 11:30 — walk until SPA accepts (or cap).
         let parkChirpCandidates = SessionWindow.parkChirpEveningCandidates()
         let parkChirpCandidatesJSON: String = {
             let pairs = parkChirpCandidates.map { window in
@@ -1058,7 +1058,7 @@ enum BookingFormPrefill {
             return 'applied';
           }
 
-          /// Walk today→+3 days × start 5:30…11:00 → end 11:30 until SPA keeps the window as-is.
+          /// Walk today→current+2 × start 5:30…11:00 → end 11:30 until SPA keeps the window (or cap).
           function applyParkChirpUrlDatesAndTimes() {
             if (!isParkChirp()) return false;
             if (window.__parkingParkChirpTimesDone) return false;
