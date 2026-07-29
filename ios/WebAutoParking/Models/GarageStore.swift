@@ -75,7 +75,7 @@ final class GarageStore: ObservableObject {
                 result.append(preset)
             }
         }
-        // Keep default order: ParkChirp Harbor first when present.
+        // Keep default order from `defaultGarages` (ParkChirp Harbor last).
         return Self.orderedWithDefaultsFirst(result)
     }
 
@@ -95,10 +95,10 @@ final class GarageStore: ObservableObject {
     }
 
     private static let defaultGarages: [Garage] = [
-        .harborParkChirp,
         .harborWeehawken,
         .bisbyJerseyCity,
-        .mallDriveJerseyCity
+        .mallDriveJerseyCity,
+        .harborParkChirp
     ]
 
     private func save() {
