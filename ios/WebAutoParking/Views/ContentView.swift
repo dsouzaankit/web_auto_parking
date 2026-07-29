@@ -23,29 +23,11 @@ struct ContentView: View {
                 systemImage: "magnifyingglass",
                 brands: searchBrands
             )
-            webTab(tag: 2, title: "Zone Parking", tabLabel: "Zone", systemImage: "number.circle", url: FixedDurationURLs.zoneStart)
         }
         .onChange(of: selectedTab) { _, tab in
             activatedTabs.insert(tab)
             AppLog.log("Tab selected \(tab)")
         }
-    }
-
-    @ViewBuilder
-    private func webTab(tag: Int, title: String, tabLabel: String, systemImage: String, url: URL) -> some View {
-        NavigationStack {
-            Group {
-                if activatedTabs.contains(tag) {
-                    ParkingWebView(title: title, url: url)
-                } else {
-                    Color.clear
-                }
-            }
-        }
-        .tabItem {
-            Label(tabLabel, systemImage: systemImage)
-        }
-        .tag(tag)
     }
 
     @ViewBuilder

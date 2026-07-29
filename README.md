@@ -72,7 +72,6 @@ Presets above are saved by default (existing installs pick up missing ones on ne
 |-----|----------|
 | **Garages** | Saved facilities → provider checkout (main automation path) |
 | **Find** | ParkMobile / SpotHero search (segmented); prefill skipped until checkout |
-| **Zone** | Meter / zone start |
 
 ## Build & install (no Mac)
 
