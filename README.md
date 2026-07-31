@@ -31,6 +31,7 @@ On checkout / login-to-checkout pages, the WebView will:
 - Visible captcha challenges pause fill (badge-only reCAPTCHA is ignored).
 - SpotHero’s vehicle popup has **State or Province** only (no Country field).
 - **ParkMobile time quirk:** their checkout builder takes UTC clock hours then appends the local offset, so a real `09:45-04:00` becomes `13:45-04:00` (start jumps to the old end / 1:45 PM). We open `/checkout/reservation/…` directly with local wall times stamped as `Z` (e.g. `09:45:00Z`) so their UTC getters keep the ASAP hour. Do not switch back to naive/`-04:00` `startDate`+Reserve without retesting.
+- **Harbor 6h open override:** tapping [Lincoln Harbor Garage](https://app.parkmobile.io/reservation/12551) (`12551`) or [1525 Harbor Garage](https://app.parkmobile.io/reservation/62713) (`62713`) sets Fixed duration to **6h** for that open. Tap a **3h–6h** segment first if you want a different length for the next open; another Harbor tap without touching the picker resets to 6h again. Bisby and other lots keep the picker as-is.
 - **Lincoln Harbor evening package:** [1525 Harbor Garage](https://app.parkmobile.io/reservation/62713) (`62713`) often rewrites evening ASAP/−15m/−30m 3–6h windows into a fixed **~5:30 PM → 12:30 AM (7h)** rate package. Z-stamped checkout still works (no UTC hour jump); Bisby keeps the requested window. This is ParkMobile’s rate packaging for that facility, not an app start-mode bug.
 - **ParkChirp time quirk:** deep-link `startTime`/`endTime` are unix seconds. If you pass a real Eastern epoch, their GUI shows **UTC clock hours as local** (e.g. 5:30 PM EDT → **9:30 PM**). Same class of bug as ParkMobile. We stamp **local wall clock as if UTC** (`SessionWindow.unixParkChirpWallSeconds`) so 5:30 PM stays 5:30 PM. Do not switch to real EDT timestamps without retesting.
 - **ParkChirp Harbor evening walk:** [1525 Harbor Blvd](https://parkchirp.com/facilities/1525-harbor-blvd/) (`1525-harbor-blvd`, facility `96657`) ignores Session ASAP/−15m/−30m and 3–6h duration. Deep link opens **today 5:30 PM → 11:30 PM**. After sign-in + plate, prefill walks until the SPA **keeps a window as-is** or the day hits **current + 2** (whichever is earlier): for each day, try start **5:30 / 6:00 / … / 11:00 PM** with end **11:30 PM** (`setTimes` / `parkChirpTimesPending`, ~2s settle). Skips dates/times missing from the picker (past start, **lot full / sold out**, etc.). Login: `autofillHint` focuses email for saved **parkchirp.com** credentials. Stops at **Checkout**; payment HTTP **500** on saved/real card (PC and in-app) — provider-side; treat purchase as manual.
@@ -51,19 +52,20 @@ Useful log lines: `Prefill inject`, `Prefill JS {"status":"advanced|filled|waiti
 
 | Provider | Example | URL shape |
 |----------|---------|-----------|
-| **Fixed duration** | [1525 Harbor Garage](https://app.parkmobile.io/reservation/62713) | `/checkout/reservation/{id}?start_at=…Z&stop_at=…Z` (**3–6h** locked) |
-| **Fixed duration** | [(SP+) The Bisby Garage](https://app.parkmobile.io/reservation/59277) | same (vehicle plate required) |
+| **Fixed duration** | [(SP+) The Bisby Garage](https://app.parkmobile.io/reservation/59277) | `/checkout/reservation/{id}?start_at=…Z&stop_at=…Z` (**3–6h** locked; vehicle plate required) |
+| **Fixed duration** | [Lincoln Harbor Garage](https://app.parkmobile.io/reservation/12551) | same (**opens at 6h** unless picker was just changed) |
+| **Fixed duration** | [1525 Harbor Garage](https://app.parkmobile.io/reservation/62713) | same (**opens at 6h** unless picker was just changed) |
 | **Flexible** | [29245 Mall Dr. E](https://spothero.com/purchase/hourly?facility=131895) | `/purchase/hourly?facility={id}&starts=…` (**no `ends`** — free extra time kept) |
 | **ParkChirp** | [1525 Harbor Blvd](https://parkchirp.com/facilities/1525-harbor-blvd/?checkout=true&type=hourly) | `/facilities/{slug}/?checkout=true&type=hourly&startTime=…&endTime=…` (unix **wall-as-UTC**; **5:30…11:00→11:30 through current+2** — list tag **Fixed duration**; **sign-in required**) |
 
-Presets above are saved by default (existing installs pick up missing ones on next launch; **ParkChirp Harbor is listed last**).
+Presets above are saved by default in that order (existing installs pick up missing ones on next launch; **ParkChirp Harbor is listed last**).
 
 ## Session defaults
 
 | Setting | Fixed duration (ParkMobile) | Flexible (SpotHero) | ParkChirp Harbor |
 |---------|----------------------------|---------------------|------------------|
 | **Start** | **Last 15m** (or ASAP / last 30m) | Same | **5:30…11:00 PM** (per day through current+2; walk until accepted) |
-| **Duration** | Global **3–6h** (config + in-app toggle) | Not forced — may add **free extra time** | End locked at 11:30 PM |
+| **Duration** | Global **3–6h** (config + in-app toggle); Lincoln/1525 Harbor **force 6h on open** unless picker tapped first | Not forced — may add **free extra time** | End locked at 11:30 PM |
 | **End** | Start + duration | Omitted so the rate package can extend | **11:30 PM** (same candidate day) |
 
 ## Tabs
