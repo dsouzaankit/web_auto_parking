@@ -95,8 +95,9 @@ final class GarageStore: ObservableObject {
     }
 
     private static let defaultGarages: [Garage] = [
-        .harborWeehawken,
         .bisbyJerseyCity,
+        .lincolnHarborWeehawken,
+        .harborWeehawken,
         .mallDriveJerseyCity,
         .harborParkChirp
     ]

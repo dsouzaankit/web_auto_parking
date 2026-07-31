@@ -9,6 +9,10 @@ struct GarageListView: View {
     @State private var sessionSummary = ""
     @State private var lanEnabled = LANLogServer.isEnabled
     @State private var lanURLSummary = ""
+    /// When true, next garage open keeps the picker value (skips Lincoln/1525 6h override).
+    @State private var durationChosenViaPicker = false
+    /// Ignores the next duration `onChange` from a programmatic 6h override.
+    @State private var ignoreNextDurationChange = false
 
     private let timer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
@@ -42,14 +46,23 @@ struct GarageListView: View {
             Section {
                 ForEach(store.garages) { garage in
                     Button {
+                        // Lincoln Harbor / 1525 Harbor → 6h on each tap, unless user just picked a duration.
+                        if let preferred = garage.preferredDurationHours, !durationChosenViaPicker {
+                            if sessionPrefs.durationHours != preferred {
+                                ignoreNextDurationChange = true
+                                sessionPrefs.durationHours = preferred
+                            }
+                        }
+                        durationChosenViaPicker = false
+                        let hours = sessionPrefs.durationHours
                         let url = garage.reservationURL(
                             from: .now,
-                            durationHours: sessionPrefs.durationHours,
+                            durationHours: hours,
                             startMode: sessionPrefs.startMode
                         )
                         AppLog.log(
                             "Open garage \(garage.name) id=\(garage.facilityID) provider=\(garage.provider.rawValue) " +
-                            "startMode=\(sessionPrefs.startMode.rawValue) url=\(url.absoluteString)"
+                            "startMode=\(sessionPrefs.startMode.rawValue) duration=\(hours)h url=\(url.absoluteString)"
                         )
                         sessionURL = url
                         selectedGarage = garage
@@ -126,6 +139,11 @@ struct GarageListView: View {
             refreshLANSummary()
         }
         .onChange(of: sessionPrefs.durationHours) { _, _ in
+            if ignoreNextDurationChange {
+                ignoreNextDurationChange = false
+            } else {
+                durationChosenViaPicker = true
+            }
             refreshSummary()
         }
         .onChange(of: sessionPrefs.startMode) { _, _ in
