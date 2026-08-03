@@ -1,6 +1,6 @@
 # Web Auto Parking (iOS)
 
-SwiftUI wrapper that opens provider checkout in a `WKWebView`, defaulting to the **last 15-minute mark** start (toggle ASAP / −15m / −30m), with automated guest/contact/vehicle steps on ParkMobile and SpotHero, plus ParkChirp Harbor (sign-in, evening window walk).
+SwiftUI wrapper that opens provider checkout in a `WKWebView`, defaulting to the **last 15-minute mark** start (toggle ASAP / −15m / −30m), with automated guest/contact/vehicle steps on ParkMobile and SpotHero, plus ParkChirp Harbor (sign-in, evening window walk), and a **Zone** tab for ParkMobile `/zone/start` (auto-Continue on site-prefilled zone → duration ≤ 1h 40m when available → Apple Pay prep).
 
 ## Prefill config (edit by hand)
 
@@ -46,7 +46,17 @@ On checkout / login-to-checkout pages, the WebView will:
 3. Toggle under **Garages → LAN logs**. Bonjour name: `webautoparking._http._tcp`.
 4. Log file is **cleared on each app launch** (cold start), then starts with `App launch v… build …`.
 
-Useful log lines: `Prefill inject`, `Prefill JS {"status":"advanced|filled|waiting",...}`, `action":"reserve|guest|awaitSignIn|autofillHint|loginSubmit|setTimes|awaitCheckout|saveContinue|vehicleAdd|vehicleConfirm|applePay|acknowledge"`.
+Useful log lines: `Prefill inject`, `Prefill JS {"status":"advanced|filled|waiting",...}`, `action":"awaitZonePrefill|awaitManualZoneSubmit|awaitZoneAuth|zoneContinue|setDuration|searchZonesMode|geo|pickZone|reserve|guest|awaitSignIn|autofillHint|loginSubmit|setTimes|awaitCheckout|saveContinue|vehicleAdd|vehicleConfirm|applePay|acknowledge"`.
+
+## WebView inspector (Windows, USB)
+
+Inspect in-app `WKWebView` network/XHR (Safari Web Inspector via [`ios-safari-remote-debug-kit`](https://github.com/HimbeersaftLP/ios-safari-remote-debug-kit)):
+
+1. App already sets `webView.isInspectable = true` (iOS 16.4+) — rebuild/redeploy after pulling that change.
+2. Phone: **Settings → Safari → Advanced → Web Inspector** on; USB + trust in **Apple Devices**.
+3. From `P:\all_scripts\iOS apps\env_setup`: run `.\start-ios-webview-debug.ps1` (first-time generate: `.\setup-ios-webview-debug.ps1`).
+4. Open **Zone** or a garage in the app, then pick the page at `http://localhost:9222/` and open `http://localhost:8080/Main.html?ws=localhost:9222/devtools/page/N`.
+5. Optional: save HAR / zone XHR dumps under [`ai/parkmobile_zone_xhr/`](ai/parkmobile_zone_xhr/) for automation tweaks.
 
 ## Providers
 
@@ -72,7 +82,16 @@ Presets above are saved by default in that order (existing installs pick up miss
 
 | Tab | Behavior |
 |-----|----------|
-| **Garages** | Saved facilities → provider checkout (main automation path) |
+| **Garages** | Saved facilities → provider checkout (garage automation path) |
+| **Zone** | Opens [`app.parkmobile.io/zone/start`](https://app.parkmobile.io/zone/start). Auto-taps **Continue** (duration ≤ **1h 40m** when selectors exist) until URL is `/zone/auth?checkoutState=…`, then guest → contact → vehicle → Apple Pay prep. |
+
+### Zone flow notes
+
+- Allow **Location** when prompted so ParkMobile can prefill the nearest zone.
+- Loops **Continue** / **Confirm Zone** until `https://app.parkmobile.io/zone/auth?checkoutState=…`.
+- On submit errors, waits for **manual re-submit**, then resumes the Continue loop.
+- If hour/minute selectors are missing, keeps tapping **Continue**.
+- Capture notes / expected APIs: [`ai/parkmobile_zone_xhr/README.md`](ai/parkmobile_zone_xhr/README.md).
 
 ## Build & install (no Mac)
 

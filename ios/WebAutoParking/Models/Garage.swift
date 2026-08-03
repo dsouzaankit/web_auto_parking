@@ -194,6 +194,12 @@ struct Garage: Identifiable, Codable, Equatable, Hashable {
 }
 
 enum FixedDurationURLs {
+    /// On-street / zone search map.
+    static let search = URL(string: "https://app.parkmobile.io/search")!
+
+    /// Zone parking entry (ParkMobile Zone tab). Site prefills nearest zone via geolocation.
+    static let zoneStart = URL(string: "https://app.parkmobile.io/zone/start")!
+
     static func reservation(
         id: String,
         start: Date? = nil,

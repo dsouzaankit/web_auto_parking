@@ -44,6 +44,8 @@ enum BookingFormPrefill {
             || haystack.contains("payment")
             || haystack.contains("/book")
             || haystack.contains("facilities")
+            || haystack.contains("search")
+            || path.contains("/zone")
             || path.contains("login")
             || path.contains("signin")
             || path.contains("sign-in")
@@ -56,6 +58,7 @@ enum BookingFormPrefill {
         into webView: WKWebView,
         config: BookingConfig = .load(),
         trigger: Trigger = .auto,
+        context: PrefillContext = .standard,
         completion: ((Outcome) -> Void)? = nil
     ) {
         guard shouldInject(for: webView.url, trigger: trigger) else {
@@ -63,8 +66,8 @@ enum BookingFormPrefill {
             completion?(.skipped)
             return
         }
-        AppLog.log("Prefill inject (\(trigger.rawValue)) \(webView.url?.absoluteString ?? "(nil)")")
-        webView.evaluateJavaScript(script(config: config)) { result, error in
+        AppLog.log("Prefill inject (\(trigger.rawValue)) \(webView.url?.absoluteString ?? "(nil)") mode=\(context.mode.rawValue)")
+        webView.evaluateJavaScript(script(config: config, context: context)) { result, error in
             if let error {
                 AppLog.log("Prefill JS error: \(error.localizedDescription)")
                 completion?(.error)
@@ -89,7 +92,7 @@ enum BookingFormPrefill {
         return .unknown
     }
 
-    private static func script(config: BookingConfig) -> String {
+    private static func script(config: BookingConfig, context: PrefillContext = .standard) -> String {
         let email = jsonString(config.normalizedEmail)
         let phone = jsonString(config.normalizedPhone)
         let address = jsonString(config.normalizedAddress)
@@ -99,6 +102,11 @@ enum BookingFormPrefill {
         let state = jsonString(config.vehicle.normalizedState)
         let preferGuest = config.preferGuestCheckout ? "true" : "false"
         let payment = jsonString(config.prefersApplePay ? "applePay" : config.paymentMethod)
+        let zoneMode = context.mode == .parkMobileZone ? "true" : "false"
+        let zoneAuto = context.zoneAutomationEnabled ? "true" : "false"
+        let latJS = context.latitude.map { String($0) } ?? "null"
+        let lngJS = context.longitude.map { String($0) } ?? "null"
+        let maxDur = max(1, context.maxDurationMinutes)
         // Today…current+2 × 5:30…11:00 → 11:30 — walk until SPA accepts (or cap).
         let parkChirpCandidates = SessionWindow.parkChirpEveningCandidates()
         let parkChirpCandidatesJSON: String = {
@@ -127,7 +135,12 @@ enum BookingFormPrefill {
             state: \(state),
             preferGuestCheckout: \(preferGuest),
             paymentMethod: \(payment),
-            parkChirpCandidates: \(parkChirpCandidatesJSON)
+            parkChirpCandidates: \(parkChirpCandidatesJSON),
+            parkMobileZoneMode: \(zoneMode),
+            zoneAutomationEnabled: \(zoneAuto),
+            lat: \(latJS),
+            lng: \(lngJS),
+            maxDurationMinutes: \(maxDur)
           };
 
           function norm(s) { return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ''); }
@@ -1109,6 +1122,515 @@ enum BookingFormPrefill {
             return false;
           }
 
+          function bridge(msg) {
+            try {
+              if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.parkingBridge) {
+                window.webkit.messageHandlers.parkingBridge.postMessage(msg);
+              }
+            } catch (e) {}
+          }
+
+          function haversineMeters(lat1, lng1, lat2, lng2) {
+            var R = 6371000;
+            var toRad = Math.PI / 180;
+            var dLat = (lat2 - lat1) * toRad;
+            var dLng = (lng2 - lng1) * toRad;
+            var a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+              + Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad)
+              * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+            return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          }
+
+          function installZoneFetchHook() {
+            if (window.__parkingZoneFetchHooked) return;
+            window.__parkingZoneFetchHooked = true;
+            window.__parkingZoneApiResults = window.__parkingZoneApiResults || [];
+            try {
+              var orig = window.fetch;
+              if (typeof orig !== 'function') return;
+              window.fetch = function() {
+                var args = arguments;
+                var req = args[0];
+                var url = (typeof req === 'string') ? req : ((req && req.url) || '');
+                return orig.apply(this, args).then(function(res) {
+                  try {
+                    if (/\\/api\\/zones\\/search/i.test(url) && res && res.clone) {
+                      res.clone().json().then(function(data) {
+                        var list = Array.isArray(data) ? data
+                          : (data && (data.zones || data.results || data.items || data.data)) || [];
+                        if (Array.isArray(list) && list.length) {
+                          window.__parkingZoneApiResults = list;
+                          bridge({ type: 'log', message: 'zones API cached count=' + list.length });
+                        }
+                      }).catch(function() {});
+                    }
+                  } catch (e) {}
+                  return res;
+                });
+              };
+            } catch (e) {}
+          }
+
+          function isParkMobileZoneFlow() {
+            return !!cfg.parkMobileZoneMode && /parkmobile/i.test(location.hostname || '');
+          }
+
+          function isZoneSearchPage() {
+            return /\\/search/i.test(location.pathname || '');
+          }
+
+          function isZoneStartPage() {
+            return /\\/zone\\/start/i.test(location.pathname || '')
+              || /\\/zone\\/\\d+/i.test(location.pathname || '');
+          }
+
+          /// Target after zone Continue loop: /zone/auth?checkoutState=...
+          function isZoneAuthCheckoutPage() {
+            var path = location.pathname || '';
+            var q = location.search || '';
+            return /\\/zone\\/auth/i.test(path) && /(?:^|[?&])checkoutState=/i.test(q);
+          }
+
+          /// Any /zone/* page before auth+checkoutState is reached.
+          function isZonePreAuthPage() {
+            if (isZoneAuthCheckoutPage()) return false;
+            return /\\/zone(\\/|$)/i.test(location.pathname || '');
+          }
+
+          function clickSearchZonesMode() {
+            var radios = document.querySelectorAll('[role=\"radio\"], input[type=\"radio\"]');
+            for (var i = 0; i < radios.length; i++) {
+              var r = radios[i];
+              var label = ((r.getAttribute('aria-label') || '') + ' ' + (r.innerText || '') + ' ' + (r.value || '')).toLowerCase();
+              if (label.indexOf('search zones') !== -1 || label.indexOf('search zone') !== -1) {
+                var selected = r.getAttribute('aria-checked') === 'true' || r.checked;
+                if (!selected) {
+                  if (click(r)) return true;
+                }
+                return false;
+              }
+            }
+            var buttons = document.querySelectorAll('button, [role=\"button\"], label');
+            for (var j = 0; j < buttons.length; j++) {
+              var b = buttons[j];
+              var t = ((b.getAttribute('aria-label') || '') + ' ' + (b.innerText || '')).toLowerCase();
+              if (t.indexOf('search zones') !== -1 && click(b)) return true;
+            }
+            return false;
+          }
+
+          function clickGetUserLocation() {
+            if (window.__parkingDidTapGeo) return false;
+            var candidates = document.querySelectorAll('button, [role=\"button\"], a');
+            for (var i = 0; i < candidates.length; i++) {
+              var el = candidates[i];
+              var label = ((el.getAttribute('aria-label') || '') + ' ' + (el.title || '') + ' ' + (el.innerText || '')).toLowerCase();
+              if (label.indexOf('get user location') !== -1
+                  || label.indexOf('current location') !== -1
+                  || label.indexOf('my location') !== -1
+                  || label === 'locate me') {
+                window.__parkingDidTapGeo = true;
+                return click(el);
+              }
+            }
+            return false;
+          }
+
+          function zoneCandidatesFromDom() {
+            var out = [];
+            var links = document.querySelectorAll('a[href*=\"internalZoneCode\"], a[href*=\"/zone/\"]');
+            for (var i = 0; i < links.length; i++) {
+              var a = links[i];
+              var href = a.getAttribute('href') || '';
+              var aria = a.getAttribute('aria-label') || '';
+              var text = (a.innerText || '').trim();
+              var isPark = /park here/i.test(aria + ' ' + text) || /internalZoneCode=/i.test(href);
+              if (!isPark && !/\\/zone\\/start\\?internalZoneCode=/i.test(href)) continue;
+              var im = href.match(/internalZoneCode=(\\d+)/);
+              var zm = (aria + ' ' + text).match(/Zone\\s*#\\s*(\\d+)/i);
+              if (!zm) {
+                var parentText = '';
+                try { parentText = (a.parentElement && a.parentElement.parentElement && a.parentElement.parentElement.innerText) || ''; } catch (e) {}
+                zm = parentText.match(/Zone\\s*#\\s*(\\d+)/i);
+              }
+              var zoneNum = zm ? zm[1] : (im ? im[1] : '');
+              if (!zoneNum && !im) continue;
+              out.push({
+                zoneID: zoneNum || (im && im[1]) || '',
+                internalZoneCode: im ? im[1] : '',
+                label: ('Zone # ' + (zoneNum || '')).trim(),
+                href: href,
+                el: a,
+                distanceMeters: null,
+                order: out.length
+              });
+            }
+            return out;
+          }
+
+          function zoneCandidatesFromApi() {
+            var list = window.__parkingZoneApiResults || [];
+            var out = [];
+            for (var i = 0; i < list.length; i++) {
+              var z = list[i] || {};
+              var zoneID = String(z.zoneCode || z.zoneNumber || z.displayZoneCode || z.publicZoneCode || z.zone || z.code || '');
+              var internal = String(z.internalZoneCode || z.internalCode || z.id || z.zoneId || z.zoneID || '');
+              var lat = z.latitude != null ? z.latitude : (z.lat != null ? z.lat : (z.location && z.location.lat));
+              var lng = z.longitude != null ? z.longitude : (z.lng != null ? z.lng : (z.lon != null ? z.lon : (z.location && (z.location.lng || z.location.lon))));
+              var dist = null;
+              if (cfg.lat != null && cfg.lng != null && lat != null && lng != null) {
+                dist = haversineMeters(cfg.lat, cfg.lng, Number(lat), Number(lng));
+              } else if (typeof z.distance === 'number') {
+                dist = z.distance;
+              } else if (typeof z.distanceInMeters === 'number') {
+                dist = z.distanceInMeters;
+              }
+              if (!zoneID && !internal) continue;
+              out.push({
+                zoneID: zoneID || internal,
+                internalZoneCode: internal,
+                label: z.name ? String(z.name) : ('Zone # ' + (zoneID || internal)),
+                href: internal ? ('/zone/start?internalZoneCode=' + internal) : '',
+                el: null,
+                distanceMeters: dist,
+                order: i
+              });
+            }
+            return out;
+          }
+
+          function pickNearestZoneCandidate() {
+            var api = zoneCandidatesFromApi();
+            var dom = zoneCandidatesFromDom();
+            var merged = api.length ? api : dom;
+            if (!merged.length) return null;
+            var withDist = merged.filter(function(z) { return typeof z.distanceMeters === 'number'; });
+            if (withDist.length) {
+              withDist.sort(function(a, b) { return a.distanceMeters - b.distanceMeters; });
+              return withDist[0];
+            }
+            // After geo recenter, ParkMobile lists zones nearest-first.
+            merged.sort(function(a, b) { return a.order - b.order; });
+            return merged[0];
+          }
+
+          function activateNearestZone(candidate) {
+            if (window.__parkingZoneActivated) return false;
+            window.__parkingZoneActivated = true;
+            if (candidate.el && click(candidate.el)) return true;
+            var href = candidate.href || '';
+            if (href) {
+              try {
+                if (href.indexOf('http') === 0) location.href = href;
+                else location.href = href.indexOf('/') === 0 ? href : ('/' + href);
+                return true;
+              } catch (e) {}
+            }
+            return false;
+          }
+
+          function parseDurationMinutesFromOption(text, value) {
+            var raw = String(text || '') + ' ' + String(value || '');
+            var n = raw.toLowerCase();
+            var hm = n.match(/(\\d+)\\s*h(?:ours?)?\\s*(\\d+)\\s*m/);
+            if (hm) return parseInt(hm[1], 10) * 60 + parseInt(hm[2], 10);
+            var hOnly = n.match(/(\\d+)\\s*h(?:our)?s?\\b/);
+            var mOnly = n.match(/(\\d+)\\s*m(?:in(?:ute)?s?)?\\b/);
+            if (hOnly && mOnly) return parseInt(hOnly[1], 10) * 60 + parseInt(mOnly[1], 10);
+            if (hOnly && !mOnly) return parseInt(hOnly[1], 10) * 60;
+            if (mOnly && !hOnly) return parseInt(mOnly[1], 10);
+            if (/^\\d+$/.test(String(value || '').trim())) {
+              var v = parseInt(value, 10);
+              // Heuristic: small ints on hour dropdowns are hours.
+              return v;
+            }
+            return null;
+          }
+
+          function selectGreatestDurationUpToMax() {
+            if (window.__parkingZoneDurationSet) return false;
+            var maxMin = cfg.maxDurationMinutes || 100;
+            var selects = document.querySelectorAll('select');
+            var hourSelect = null;
+            var minuteSelect = null;
+            var combinedSelect = null;
+            for (var i = 0; i < selects.length; i++) {
+              var s = selects[i];
+              if (!visible(s)) continue;
+              var meta = ((s.getAttribute('aria-label') || '') + ' ' + (s.name || '') + ' ' + (s.id || '') + ' ' + ((s.labels && s.labels[0] && s.labels[0].innerText) || '')).toLowerCase();
+              if (/duration|time|how long|length/.test(meta) && !/hour|minute|min|hr/.test(meta)) {
+                combinedSelect = combinedSelect || s;
+              }
+              if (/hour|hr\\b/.test(meta)) hourSelect = hourSelect || s;
+              if (/minute|min\\b/.test(meta)) minuteSelect = minuteSelect || s;
+            }
+            // Unlabeled pair near duration copy: first=hours, second=minutes.
+            if ((!hourSelect || !minuteSelect) && selects.length >= 2) {
+              var visibleSelects = [];
+              for (var v = 0; v < selects.length; v++) if (visible(selects[v])) visibleSelects.push(selects[v]);
+              if (visibleSelects.length >= 2 && /duration|hour|minute|how long/i.test(document.body.innerText || '')) {
+                hourSelect = hourSelect || visibleSelects[0];
+                minuteSelect = minuteSelect || visibleSelects[1];
+              }
+            }
+
+            if (combinedSelect) {
+              var bestIdx = -1;
+              var bestMins = -1;
+              for (var o = 0; o < combinedSelect.options.length; o++) {
+                var opt = combinedSelect.options[o];
+                var mins = parseDurationMinutesFromOption(opt.text, opt.value);
+                if (mins == null) continue;
+                // Treat bare numbers on a combined select as minutes when > 3, else hours.
+                if (/^\\d+$/.test(String(opt.value || '').trim()) && mins <= 3) mins = mins * 60;
+                if (mins <= maxMin && mins > bestMins) {
+                  bestMins = mins;
+                  bestIdx = o;
+                }
+              }
+              if (bestIdx >= 0 && combinedSelect.selectedIndex !== bestIdx) {
+                combinedSelect.selectedIndex = bestIdx;
+                combinedSelect.dispatchEvent(new Event('input', { bubbles: true }));
+                combinedSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                window.__parkingZoneDurationSet = true;
+                return true;
+              }
+            }
+
+            if (hourSelect && minuteSelect) {
+              var maxH = Math.floor(maxMin / 60);
+              var bestH = -1;
+              var bestM = -1;
+              var hourOpts = [];
+              for (var hi = 0; hi < hourSelect.options.length; hi++) {
+                var hOpt = hourSelect.options[hi];
+                var hVal = parseInt(String(hOpt.value).replace(/[^0-9]/g, ''), 10);
+                if (isNaN(hVal)) hVal = parseInt(String(hOpt.text).replace(/[^0-9]/g, ''), 10);
+                if (!isNaN(hVal) && hVal <= maxH) hourOpts.push({ idx: hi, h: hVal });
+              }
+              hourOpts.sort(function(a, b) { return b.h - a.h; });
+              for (var k = 0; k < hourOpts.length; k++) {
+                var candH = hourOpts[k];
+                var remain = maxMin - candH.h * 60;
+                var localBestM = -1;
+                var localBestIdx = -1;
+                for (var mi = 0; mi < minuteSelect.options.length; mi++) {
+                  var mOpt = minuteSelect.options[mi];
+                  var mVal = parseInt(String(mOpt.value).replace(/[^0-9]/g, ''), 10);
+                  if (isNaN(mVal)) mVal = parseInt(String(mOpt.text).replace(/[^0-9]/g, ''), 10);
+                  if (isNaN(mVal)) continue;
+                  if (mVal <= remain && mVal > localBestM) {
+                    localBestM = mVal;
+                    localBestIdx = mi;
+                  }
+                }
+                if (localBestIdx >= 0) {
+                  bestH = candH.idx;
+                  bestM = localBestIdx;
+                  break;
+                }
+              }
+              if (bestH >= 0 && bestM >= 0) {
+                var changed = false;
+                if (hourSelect.selectedIndex !== bestH) {
+                  hourSelect.selectedIndex = bestH;
+                  hourSelect.dispatchEvent(new Event('input', { bubbles: true }));
+                  hourSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                  changed = true;
+                }
+                if (minuteSelect.selectedIndex !== bestM) {
+                  minuteSelect.selectedIndex = bestM;
+                  minuteSelect.dispatchEvent(new Event('input', { bubbles: true }));
+                  minuteSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                  changed = true;
+                }
+                window.__parkingZoneDurationSet = true;
+                return changed;
+              }
+            }
+            return false;
+          }
+
+          function readPrefilledZoneValue() {
+            var inputs = document.querySelectorAll('input[type=\"text\"], input[type=\"search\"], input[type=\"tel\"], input:not([type])');
+            for (var i = 0; i < inputs.length; i++) {
+              var el = inputs[i];
+              if (!visible(el)) continue;
+              var label = ((el.getAttribute('aria-label') || '') + ' ' + (el.name || '') + ' ' + (el.id || '') + ' ' + (el.placeholder || '')).toLowerCase();
+              if (label.indexOf('zone') === -1) continue;
+              var val = String(el.value || '').trim();
+              if (val) return val;
+            }
+            return '';
+          }
+
+          function zoneEntryFormVisible() {
+            var inputs = document.querySelectorAll('input[type=\"text\"], input[type=\"search\"], input[type=\"tel\"], input:not([type])');
+            for (var i = 0; i < inputs.length; i++) {
+              var el = inputs[i];
+              if (!visible(el)) continue;
+              var label = ((el.getAttribute('aria-label') || '') + ' ' + (el.name || '') + ' ' + (el.id || '') + ' ' + (el.placeholder || '')).toLowerCase();
+              if (label.indexOf('zone') !== -1) return true;
+            }
+            return false;
+          }
+
+          function zoneSubmissionErrorVisible() {
+            var alerts = document.querySelectorAll('[role=\"alert\"], [class*=\"error\"], [class*=\"Error\"], [data-testid*=\"error\"]');
+            for (var i = 0; i < alerts.length; i++) {
+              var el = alerts[i];
+              if (!visible(el)) continue;
+              var t = String(el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+              if (t.length < 3) continue;
+              if (/cookie|consent|privacy|necessary/i.test(t)) continue;
+              if (/error|sorry|not found|invalid|unable|failed|try again|difficulties|unavailable/i.test(t)) {
+                return true;
+              }
+            }
+            var body = String((document.body && document.body.innerText) || '');
+            if (/zone not found/i.test(body)) return true;
+            if (/sorry,?\\s*we.?re having technical difficulties/i.test(body)) return true;
+            if (/please check nearby signage/i.test(body)) return true;
+            if (/invalid zone/i.test(body)) return true;
+            return false;
+          }
+
+          function findZoneContinueButton() {
+            var buttons = document.querySelectorAll('button, [role=\"button\"], input[type=\"submit\"], a');
+            var confirmBtn = null;
+            var continueBtn = null;
+            for (var i = 0; i < buttons.length; i++) {
+              var b = buttons[i];
+              if (!visible(b) || b.disabled) continue;
+              var t = ((b.innerText || '') + ' ' + (b.getAttribute('aria-label') || '') + ' ' + (b.value || '')).toLowerCase().replace(/\\s+/g, ' ').trim();
+              if (!t) continue;
+              // Never payment / Apple / purchase CTAs here.
+              if (/continue with apple|apple pay|complete purchase|buy with|log in|sign up|sign in/.test(t)) continue;
+              if (/save and continue|save & continue/.test(t)) continue;
+              if (t.indexOf('confirm zone') !== -1) confirmBtn = confirmBtn || b;
+              else if (t === 'continue' || t === 'confirm' || t === 'next' || t === 'proceed') continueBtn = continueBtn || b;
+              else if (/^continue\\b/.test(t) && t.length < 24) continueBtn = continueBtn || b;
+            }
+            return confirmBtn || continueBtn;
+          }
+
+          function clickZoneContinueButton() {
+            var now = Date.now();
+            if (window.__parkingZoneContinueAt && (now - window.__parkingZoneContinueAt) < 2200) return false;
+            var btn = findZoneContinueButton();
+            if (!btn) return false;
+            if (!click(btn)) return false;
+            window.__parkingZoneContinueAt = now;
+            window.__parkingZoneLastSubmitAt = now;
+            window.__parkingZoneAwaitErrorCheck = true;
+            return true;
+          }
+
+          function hasZoneDurationSelectors() {
+            var selects = document.querySelectorAll('select');
+            var visibleCount = 0;
+            for (var i = 0; i < selects.length; i++) {
+              if (!visible(selects[i])) continue;
+              visibleCount += 1;
+              var meta = ((selects[i].getAttribute('aria-label') || '') + ' ' + (selects[i].name || '') + ' ' + (selects[i].id || '')).toLowerCase();
+              if (/hour|minute|min|duration|time|length/.test(meta)) return true;
+            }
+            if (visibleCount >= 2 && /duration|hour|minute|how long/i.test(document.body.innerText || '')) return true;
+            return false;
+          }
+
+          function zoneCheckoutStepsVisible() {
+            if (firstVisible('#email, input[name=\"email\"], input[type=\"email\"]')) return true;
+            if (firstVisible('#phone, input[name=\"phone\"], input[type=\"tel\"]')) return true;
+            if (firstVisible('#vrn, input[name=\"vrn\"]')) return true;
+            if (findContinueWithApplePayButton()) return true;
+            if (findByText('button, a, [role=\"button\"]', /continueasaguest|guestcheckout|continueasguest/)) return true;
+            return false;
+          }
+
+          function advanceParkMobileZone() {
+            if (!isParkMobileZoneFlow() || !cfg.zoneAutomationEnabled) return null;
+            installZoneFetchHook();
+
+            // Legacy /search path (map list) — auto-pick nearest, no native confirm.
+            if (isZoneSearchPage()) {
+              if (dismissCookieBanner()) {
+                return { status: 'advanced', filled: 0, action: 'cookie' };
+              }
+              if (clickSearchZonesMode()) {
+                return { status: 'advanced', filled: 0, action: 'searchZonesMode' };
+              }
+              if (clickGetUserLocation()) {
+                return { status: 'advanced', filled: 0, action: 'geo' };
+              }
+              var candidate = pickNearestZoneCandidate();
+              if (!candidate) {
+                return { status: 'waiting', filled: 0, action: 'awaitZones' };
+              }
+              if (activateNearestZone(candidate)) {
+                return { status: 'advanced', filled: 0, action: 'pickZone' };
+              }
+              return { status: 'waiting', filled: 0, action: 'pickZonePending' };
+            }
+
+            // Reached /zone/auth?checkoutState=... — hand off to guest/checkout chain.
+            if (isZoneAuthCheckoutPage()) {
+              return null;
+            }
+
+            // Loop Continue (and pause on errors) until auth+checkoutState URL.
+            if (isZonePreAuthPage() || isZoneStartPage()) {
+              if (dismissCookieBanner()) {
+                return { status: 'advanced', filled: 0, action: 'cookie' };
+              }
+
+              // After an auto-submit, detect errors; if present, wait for manual re-submit.
+              if (window.__parkingZoneAwaitErrorCheck) {
+                window.__parkingZoneAwaitErrorCheck = false;
+                if (zoneSubmissionErrorVisible()) {
+                  window.__parkingZoneAwaitManualSubmit = true;
+                  bridge({ type: 'log', message: 'zone submit error — waiting for manual re-submit' });
+                  return { status: 'waiting', filled: 0, action: 'awaitManualZoneSubmit' };
+                }
+              }
+
+              if (window.__parkingZoneAwaitManualSubmit) {
+                if (zoneSubmissionErrorVisible()) {
+                  return { status: 'waiting', filled: 0, action: 'awaitManualZoneSubmit' };
+                }
+                // Error cleared / user advanced — resume Continue loop.
+                window.__parkingZoneAwaitManualSubmit = false;
+                window.__parkingZoneEntrySubmitted = true;
+                bridge({ type: 'log', message: 'zone manual re-submit detected — resuming toward /zone/auth' });
+              }
+
+              if (zoneEntryFormVisible() && !readPrefilledZoneValue()) {
+                return { status: 'waiting', filled: 0, action: 'awaitZonePrefill' };
+              }
+
+              if (zoneSubmissionErrorVisible()) {
+                window.__parkingZoneAwaitManualSubmit = true;
+                return { status: 'waiting', filled: 0, action: 'awaitManualZoneSubmit' };
+              }
+
+              // Optional duration step when selectors exist; otherwise keep tapping Continue.
+              if (hasZoneDurationSelectors()) {
+                if (selectGreatestDurationUpToMax()) {
+                  return { status: 'advanced', filled: 0, action: 'setDuration' };
+                }
+              }
+
+              if (clickZoneContinueButton()) {
+                window.__parkingZoneEntrySubmitted = true;
+                return { status: 'advanced', filled: 0, action: 'zoneContinue' };
+              }
+
+              return { status: 'waiting', filled: 0, action: 'awaitZoneAuth' };
+            }
+
+            return null;
+          }
+
           // ParkChirp: wait for account sign-in; never guest, never tap Checkout.
           // Dates/hours are set once at the very end (after sign-in + plate).
           function advanceParkChirp() {
@@ -1160,6 +1682,8 @@ enum BookingFormPrefill {
               if (hasBlockingCaptcha()) return { status: 'captcha', filled: 0, action: 'captcha' };
               var parkChirpStep = advanceParkChirp();
               if (parkChirpStep) return parkChirpStep;
+              var zoneStep = advanceParkMobileZone();
+              if (zoneStep) return zoneStep;
               var action = null;
               if (dismissCookieBanner()) action = 'cookie';
               if (clickReserveParkHere()) action = action || 'reserve';

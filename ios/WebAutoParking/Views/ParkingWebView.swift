@@ -4,6 +4,7 @@ import WebKit
 struct ParkingWebView: View {
     let title: String
     let url: URL
+    var prefillContext: PrefillContext = .standard
 
     @StateObject private var model = WebViewModel()
 
@@ -17,7 +18,7 @@ struct ParkingWebView: View {
                 .frame(height: 2)
 
             // Pass model without @ObservedObject so KVO/nav updates do not recreate the UIView.
-            WebViewRepresentable(url: url, model: model)
+            WebViewRepresentable(url: url, model: model, prefillContext: prefillContext)
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
@@ -46,7 +47,7 @@ struct ParkingWebView: View {
                 }
 
                 Button {
-                    model.prefill()
+                    model.prefill(context: prefillContext)
                 } label: {
                     Image(systemName: "wand.and.stars")
                 }
@@ -73,18 +74,19 @@ final class WebViewModel: ObservableObject {
     func goBack() { webView?.goBack() }
     func goForward() { webView?.goForward() }
     func reload() { webView?.reload() }
-    func prefill() {
+    func prefill(context: PrefillContext = .standard) {
         guard let webView else { return }
-        BookingFormPrefill.inject(into: webView, trigger: .manual)
+        BookingFormPrefill.inject(into: webView, trigger: .manual, context: context)
     }
 }
 
 struct WebViewRepresentable: UIViewRepresentable {
     let url: URL
     let model: WebViewModel
+    var prefillContext: PrefillContext = .standard
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(model: model)
+        Coordinator(model: model, prefillContext: prefillContext)
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -97,12 +99,17 @@ struct WebViewRepresentable: UIViewRepresentable {
         config.allowsInlineMediaPlayback = true
         // Isolate from other WebViews so one bad page cannot take down every tab.
         config.processPool = WKProcessPool()
+        config.userContentController.add(context.coordinator, name: Coordinator.bridgeName)
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
+        // Opt-in for Safari Web Inspector / ios-webkit-debug-proxy (iOS 16.4+).
+        if #available(iOS 16.4, *) {
+            webView.isInspectable = true
+        }
 
         context.coordinator.bind(webView)
         model.webView = webView
@@ -112,27 +119,32 @@ struct WebViewRepresentable: UIViewRepresentable {
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
-        // Do not reload on SwiftUI refreshes.
+        context.coordinator.prefillContext = prefillContext
     }
 
     static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
         AppLog.log("WebView dismantle")
+        uiView.configuration.userContentController.removeScriptMessageHandler(forName: Coordinator.bridgeName)
         coordinator.unbind()
         uiView.stopLoading()
         uiView.navigationDelegate = nil
         uiView.uiDelegate = nil
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
+        static let bridgeName = "parkingBridge"
+
         private let model: WebViewModel
+        var prefillContext: PrefillContext
         private var observations: [NSKeyValueObservation] = []
         private var lastPublishedProgress: Double = -1
         private var prefillWorkItem: DispatchWorkItem?
         private var autoPrefillAttempts = 0
         private var lastPrefillURL: String?
 
-        init(model: WebViewModel) {
+        init(model: WebViewModel, prefillContext: PrefillContext) {
             self.model = model
+            self.prefillContext = prefillContext
         }
 
         func bind(_ webView: WKWebView) {
@@ -171,6 +183,22 @@ struct WebViewRepresentable: UIViewRepresentable {
             observations.removeAll()
         }
 
+        func userContentController(
+            _ userContentController: WKUserContentController,
+            didReceive message: WKScriptMessage
+        ) {
+            guard message.name == Self.bridgeName,
+                  let body = message.body as? [String: Any]
+            else { return }
+            DispatchQueue.main.async {
+                let type = body["type"] as? String ?? ""
+                if type == "log" {
+                    let text = body["message"] as? String ?? "\(body)"
+                    AppLog.log("Prefill bridge \(text)")
+                }
+            }
+        }
+
         private func scheduleAutoPrefill(for webView: WKWebView) {
             prefillWorkItem?.cancel()
             autoPrefillAttempts = 0
@@ -183,14 +211,13 @@ struct WebViewRepresentable: UIViewRepresentable {
             let work = DispatchWorkItem { [weak self, weak webView] in
                 guard let self, let webView else { return }
                 self.autoPrefillAttempts += 1
-                BookingFormPrefill.inject(into: webView, trigger: .auto) { outcome in
+                BookingFormPrefill.inject(into: webView, trigger: .auto, context: self.prefillContext) { outcome in
                     DispatchQueue.main.async {
                         let shouldRetry: Bool
                         switch outcome {
                         case .filled, .error:
                             shouldRetry = false
                         case .skipped:
-                            // Search pages stay skipped; login/checkout URL changes restart via KVO.
                             shouldRetry = false
                         case .advanced, .captcha, .waiting, .unknown:
                             shouldRetry = self.autoPrefillAttempts < 40
@@ -278,6 +305,17 @@ struct WebViewRepresentable: UIViewRepresentable {
                 webView.load(URLRequest(url: url))
             }
             return nil
+        }
+
+        @available(iOS 15.0, *)
+        func webView(
+            _ webView: WKWebView,
+            requestGeolocationPermissionForOrigin origin: WKSecurityOrigin,
+            initiatedByFrame frame: WKFrameInfo,
+            decisionHandler: @escaping (WKPermissionDecision) -> Void
+        ) {
+            AppLog.log("WebView geolocation grant for \(origin.host)")
+            decisionHandler(.grant)
         }
     }
 }
