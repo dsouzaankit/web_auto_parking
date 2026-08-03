@@ -200,8 +200,8 @@ struct WebViewRepresentable: UIViewRepresentable {
                 } else if type == "xhr" {
                     let method = body["method"] as? String ?? "?"
                     let url = body["url"] as? String ?? "?"
-                    let status = intValue(body["status"])
-                    let ms = intValue(body["ms"])
+                    let status = self.intValue(body["status"])
+                    let ms = self.intValue(body["ms"])
                     let kind = body["kind"] as? String ?? "xhr"
                     let req = body["requestBody"] as? String ?? ""
                     let res = body["responseBody"] as? String ?? ""
