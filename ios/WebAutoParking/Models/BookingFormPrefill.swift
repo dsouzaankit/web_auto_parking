@@ -516,35 +516,103 @@ enum BookingFormPrefill {
             return true;
           }
 
-          function clickParkMobileVehicleContinue() {
-            var now = Date.now();
-            if (window.__parkingLastSaveAt && (now - window.__parkingLastSaveAt) < 2500) return false;
+          function findParkMobileVehicleContinueButton() {
+            var selectors = [
+              'button[type=\"submit\"]',
+              'input[type=\"submit\"]',
+              'button, a, [role=\"button\"], input[type=\"button\"]'
+            ];
+            var seen = [];
+            var fallback = null;
+            for (var s = 0; s < selectors.length; s++) {
+              var nodes = [];
+              try { nodes = document.querySelectorAll(selectors[s]); } catch (e) { continue; }
+              for (var i = 0; i < nodes.length; i++) {
+                var b = nodes[i];
+                if (!b || seen.indexOf(b) !== -1 || !visible(b)) continue;
+                seen.push(b);
+                var tid = ((b.getAttribute('data-pmtest-id') || '') + ' ' + (b.getAttribute('data-testid') || '')).toLowerCase();
+                var t = ((b.innerText || b.textContent || '') + ' ' + (b.getAttribute('aria-label') || '')
+                  + ' ' + (b.value || '') + ' ' + tid).toLowerCase().replace(/\\s+/g, ' ').trim();
+                var key = norm(t);
+                if (!key && (b.type || '').toLowerCase() !== 'submit') continue;
+                if (/continue with apple|apple pay|complete purchase|buy with|log in|sign up|sign in|guest/.test(t)) continue;
+                if (/payment/.test(tid) && tid.indexOf('vehicle') === -1) continue;
+                if (tid.indexOf('continue') !== -1 || tid.indexOf('vehiclesubmit') !== -1
+                    || (tid.indexOf('vehicle') !== -1 && tid.indexOf('confirm') !== -1)) {
+                  return b;
+                }
+                if (key === 'saveandcontinue' || key === 'savecontinue' || key === 'continue'
+                    || key === 'next' || key === 'save' || key === 'addvehicle' || key === 'confirm') {
+                  return b;
+                }
+                // \"Continue\" with trailing icon/accessibility junk still starts with continue.
+                if (key.indexOf('continue') === 0 && key.length < 32) return b;
+                if ((b.type || '').toLowerCase() === 'submit') {
+                  fallback = fallback || b;
+                }
+              }
+            }
+            return fallback;
+          }
+
+          function vehicleFormReady() {
             var plate = firstVisible(
               '#vrn, input[name=\"vrn\"], #licensePlate, input[name*=\"plate\" i], input[id*=\"plate\" i]'
             );
-            if (!plate || !visible(plate)) return false;
-            if (cfg.licensePlateNumber && norm(String(plate.value || '')) !== norm(cfg.licensePlateNumber)) return false;
-            if (!String(plate.value || '').trim()) return false;
+            if (!plate || !visible(plate) || !String(plate.value || '').trim()) return null;
+            if (cfg.licensePlateNumber && norm(String(plate.value || '')) !== norm(cfg.licensePlateNumber)) return null;
             var country = firstVisible('select#country, select[name=\"country\"], select[name*=\"country\" i]');
             var state = firstVisible('select#state, select[name=\"state\"], select[name*=\"state\" i], select[name*=\"province\" i]');
-            if (cfg.country && country && visible(country) && !selectMatchesValue(country, cfg.country)) return false;
-            if (cfg.state && state && visible(state) && !selectMatchesValue(state, cfg.state)) return false;
-            var btn = findByText(
-              'button, a, [role=\"button\"], input[type=\"button\"], input[type=\"submit\"]',
-              /saveandcontinue|savecontinue/
-            );
+            if (cfg.country && country && visible(country) && !selectMatchesValue(country, cfg.country)) return null;
+            if (cfg.state && state && visible(state) && !selectMatchesValue(state, cfg.state)) return null;
+            return { plate: plate, country: country, state: state };
+          }
+
+          function nudgeVehicleFormValidation(plate) {
+            if (!plate) return;
+            try {
+              plate.focus();
+              plate.dispatchEvent(new Event('input', { bubbles: true }));
+              plate.dispatchEvent(new Event('change', { bubbles: true }));
+              plate.dispatchEvent(new Event('blur', { bubbles: true }));
+            } catch (e) {}
+          }
+
+          function forceClickDisabled(el) {
+            if (!el) return false;
+            try {
+              if (el.disabled) el.disabled = false;
+              if (el.getAttribute('aria-disabled') === 'true') el.setAttribute('aria-disabled', 'false');
+              el.removeAttribute('disabled');
+            } catch (e) {}
+            return click(el, { scroll: false });
+          }
+
+          function clickParkMobileVehicleContinue() {
+            var now = Date.now();
+            if (window.__parkingLastSaveAt && (now - window.__parkingLastSaveAt) < 2500) return false;
+            var form = vehicleFormReady();
+            if (!form) return false;
+            nudgeVehicleFormValidation(form.plate);
+            var btn = findParkMobileVehicleContinueButton();
             if (!btn) {
-              btn = findByText(
-                'button, a, [role=\"button\"], input[type=\"button\"], input[type=\"submit\"]',
-                /^(continue|next|addvehicle|save)$/
-              );
+              if (!window.__parkingVehicleContinueMissLogged) {
+                window.__parkingVehicleContinueMissLogged = true;
+                bridge({ type: 'log', message: 'vehicle Continue button not found' });
+              }
+              return false;
             }
-            if (!btn || !visible(btn) || btn.disabled) return false;
-            if (/continue with apple|apple pay|complete purchase|buy with|log in|sign up|sign in/i.test(
-              ((btn.innerText || '') + ' ' + (btn.getAttribute('aria-label') || ''))
-            )) return false;
-            if (!click(btn, { scroll: false })) return false;
+            var ariaDisabled = btn.getAttribute('aria-disabled') === 'true';
+            if (btn.disabled || ariaDisabled) {
+              // React often keeps Continue disabled until a real input cycle; nudge then force.
+              nudgeVehicleFormValidation(form.plate);
+              if (!forceClickDisabled(btn)) return false;
+            } else if (!click(btn, { scroll: false })) {
+              return false;
+            }
             window.__parkingLastSaveAt = now;
+            bridge({ type: 'log', message: 'vehicle Continue tapped' });
             return true;
           }
 
@@ -1508,35 +1576,170 @@ enum BookingFormPrefill {
             return out;
           }
 
+          function zonePointLatLng(z) {
+            if (!z) return null;
+            if (z.latitude != null && z.longitude != null) return { lat: Number(z.latitude), lng: Number(z.longitude) };
+            if (z.lat != null && (z.lng != null || z.lon != null)) return { lat: Number(z.lat), lng: Number(z.lng != null ? z.lng : z.lon) };
+            if (z.location && z.location.lat != null) {
+              return { lat: Number(z.location.lat), lng: Number(z.location.lng != null ? z.location.lng : z.location.lon) };
+            }
+            if (z.gpsPoints && z.gpsPoints.length) {
+              var g = z.gpsPoints[0];
+              if (g && g.latitude != null && g.longitude != null) return { lat: Number(g.latitude), lng: Number(g.longitude) };
+            }
+            if (z.zoneInfo && z.zoneInfo.latitude != null) {
+              return { lat: Number(z.zoneInfo.latitude), lng: Number(z.zoneInfo.longitude) };
+            }
+            return null;
+          }
+
           function zoneCandidatesFromApi() {
             var list = window.__parkingZoneApiResults || [];
             var out = [];
             for (var i = 0; i < list.length; i++) {
               var z = list[i] || {};
-              var zoneID = String(z.zoneCode || z.zoneNumber || z.displayZoneCode || z.publicZoneCode || z.zone || z.code || '');
-              var internal = String(z.internalZoneCode || z.internalCode || z.id || z.zoneId || z.zoneID || '');
-              var lat = z.latitude != null ? z.latitude : (z.lat != null ? z.lat : (z.location && z.location.lat));
-              var lng = z.longitude != null ? z.longitude : (z.lng != null ? z.lng : (z.lon != null ? z.lon : (z.location && (z.location.lng || z.location.lon))));
+              // Public Zone # is signageCode (e.g. 47039); internalZoneCode is e.g. 30447039.
+              var zoneID = String(z.signageCode || z.zoneCode || z.zoneNumber || z.displayZoneCode
+                || z.publicZoneCode || z.zone || z.code || '');
+              var internal = String(z.internalZoneCode || z.internalCode || '');
+              var pt = zonePointLatLng(z);
               var dist = null;
-              if (cfg.lat != null && cfg.lng != null && lat != null && lng != null) {
-                dist = haversineMeters(cfg.lat, cfg.lng, Number(lat), Number(lng));
+              if (cfg.lat != null && cfg.lng != null && pt) {
+                dist = haversineMeters(cfg.lat, cfg.lng, pt.lat, pt.lng);
               } else if (typeof z.distance === 'number') {
                 dist = z.distance;
               } else if (typeof z.distanceInMeters === 'number') {
                 dist = z.distanceInMeters;
+              } else if (typeof z.distanceMiles === 'number') {
+                dist = z.distanceMiles * 1609.34;
               }
               if (!zoneID && !internal) continue;
               out.push({
                 zoneID: zoneID || internal,
+                signageCode: zoneID,
                 internalZoneCode: internal,
-                label: z.name ? String(z.name) : ('Zone # ' + (zoneID || internal)),
-                href: internal ? ('/zone/start?internalZoneCode=' + internal) : '',
+                label: z.locationName || z.supplierName || z.name
+                  ? String(z.locationName || z.supplierName || z.name)
+                  : ('Zone # ' + (zoneID || internal)),
+                href: internal ? ('/zone/start?internalZoneCode=' + encodeURIComponent(internal)) : '',
                 el: null,
                 distanceMeters: dist,
                 order: i
               });
             }
             return out;
+          }
+
+          function findZoneNumberInput() {
+            var inputs = document.querySelectorAll(
+              'input[type=\"text\"], input[type=\"search\"], input[type=\"tel\"], input[type=\"number\"], input:not([type])'
+            );
+            for (var i = 0; i < inputs.length; i++) {
+              var el = inputs[i];
+              if (!visible(el)) continue;
+              var label = ((el.getAttribute('aria-label') || '') + ' ' + (el.name || '') + ' ' + (el.id || '')
+                + ' ' + (el.placeholder || '') + ' ' + labelText(el)).toLowerCase();
+              if (label.indexOf('zone') !== -1) return el;
+            }
+            // /zone/start: first visible text field is usually Zone #.
+            if (isZoneStartPage()) {
+              for (var j = 0; j < inputs.length; j++) {
+                if (visible(inputs[j]) && !inputs[j].disabled && !inputs[j].readOnly) return inputs[j];
+              }
+            }
+            return null;
+          }
+
+          function requestNearestZonesFromApi() {
+            if (cfg.lat == null || cfg.lng == null) return false;
+            if (window.__parkingNearestZoneFetching) return true;
+            if (window.__parkingNearestZoneFetchedAt && (Date.now() - window.__parkingNearestZoneFetchedAt) < 15000
+                && (window.__parkingZoneApiResults || []).length) {
+              return true;
+            }
+            window.__parkingNearestZoneFetching = true;
+            var lat = Number(cfg.lat);
+            var lng = Number(cfg.lng);
+            var d = 0.02;
+            var upper = (lat + d) + ',' + (lng + d);
+            var lower = (lat - d) + ',' + (lng - d);
+            var url = '/api/zones/search?parkingType=1'
+              + '&upper=' + encodeURIComponent(upper)
+              + '&lower=' + encodeURIComponent(lower)
+              + '&center=' + encodeURIComponent(lat + ',' + lng)
+              + '&maxResults=40&includeServices=true';
+            bridge({ type: 'log', message: 'zones search nearest lat=' + lat + ' lng=' + lng });
+            try {
+              fetch(url, { credentials: 'include' }).then(function(res) {
+                return res.json();
+              }).then(function(data) {
+                var list = Array.isArray(data) ? data
+                  : (data && (data.zones || data.results || data.items || data.data)) || [];
+                window.__parkingZoneApiResults = Array.isArray(list) ? list : [];
+                window.__parkingNearestZoneFetchedAt = Date.now();
+                window.__parkingNearestZoneFetching = false;
+                var nearest = pickNearestZoneCandidate();
+                if (nearest) {
+                  window.__parkingNearestZoneCandidate = nearest;
+                  bridge({
+                    type: 'log',
+                    message: 'nearest zone #' + (nearest.signageCode || nearest.zoneID)
+                      + ' internal=' + (nearest.internalZoneCode || '')
+                      + (nearest.distanceMeters != null ? (' dist=' + Math.round(nearest.distanceMeters) + 'm') : '')
+                  });
+                } else {
+                  bridge({ type: 'log', message: 'nearest zone search empty count=' + (window.__parkingZoneApiResults || []).length });
+                }
+              }).catch(function(err) {
+                window.__parkingNearestZoneFetching = false;
+                bridge({ type: 'log', message: 'nearest zone search error ' + String(err && err.message || err) });
+              });
+            } catch (e) {
+              window.__parkingNearestZoneFetching = false;
+            }
+            return true;
+          }
+
+          /// Don't rely on site geolocation — fill Zone # or navigate with internalZoneCode.
+          function fillNearestZoneOnStartPage() {
+            if (!isZoneStartPage() && !zoneEntryFormVisible()) return null;
+            if (/internalZoneCode=/i.test(location.search || '')) {
+              return readPrefilledZoneValue() ? 'ready' : 'ready';
+            }
+            var existing = readPrefilledZoneValue();
+            if (existing) return 'ready';
+            if (cfg.lat == null || cfg.lng == null) {
+              if (!window.__parkingNoGeoLogged) {
+                window.__parkingNoGeoLogged = true;
+                bridge({ type: 'log', message: 'nearest zone skipped — no native lat/lng in prefill context' });
+              }
+              return 'nogeo';
+            }
+            requestNearestZonesFromApi();
+            var candidate = window.__parkingNearestZoneCandidate || pickNearestZoneCandidate();
+            if (!candidate) return 'pending';
+
+            // Prefer deep link — ParkMobile then loads the zone without depending on the text field.
+            if (candidate.internalZoneCode && !window.__parkingNearestZoneNavigated) {
+              window.__parkingNearestZoneNavigated = true;
+              window.__parkingNearestZoneFilled = true;
+              try {
+                location.href = '/zone/start?internalZoneCode=' + encodeURIComponent(candidate.internalZoneCode);
+                bridge({ type: 'log', message: 'navigate nearest internalZoneCode=' + candidate.internalZoneCode });
+                return 'navigated';
+              } catch (e) {}
+            }
+
+            var input = findZoneNumberInput();
+            var code = String(candidate.signageCode || candidate.zoneID || '').trim();
+            if (input && code) {
+              if (setNativeValue(input, code)) {
+                window.__parkingNearestZoneFilled = true;
+                bridge({ type: 'log', message: 'filled Zone # ' + code });
+                return 'filled';
+              }
+            }
+            return 'pending';
           }
 
           function pickNearestZoneCandidate() {
@@ -1580,139 +1783,254 @@ enum BookingFormPrefill {
             if (hOnly && !mOnly) return parseInt(hOnly[1], 10) * 60;
             if (mOnly && !hOnly) return parseInt(mOnly[1], 10);
             if (/^\\d+$/.test(String(value || '').trim())) {
-              var v = parseInt(value, 10);
-              // Heuristic: small ints on hour dropdowns are hours.
-              return v;
+              return parseInt(value, 10);
             }
             return null;
           }
 
+          function selectOptionNumbers(sel) {
+            var vals = [];
+            if (!sel || !sel.options) return vals;
+            for (var i = 0; i < sel.options.length; i++) {
+              var opt = sel.options[i];
+              var n = parseInt(String(opt.value).replace(/[^0-9]/g, ''), 10);
+              if (isNaN(n)) n = parseInt(String(opt.text).replace(/[^0-9]/g, ''), 10);
+              if (!isNaN(n)) vals.push({ idx: i, n: n, text: String(opt.text || ''), value: String(opt.value || '') });
+            }
+            return vals;
+          }
+
+          function looksLikeHourSelect(sel) {
+            var vals = selectOptionNumbers(sel).map(function(v) { return v.n; });
+            if (!vals.length) return false;
+            var max = Math.max.apply(null, vals);
+            var min = Math.min.apply(null, vals);
+            // Hours: 0..12-ish. Minutes usually include 15/20/30/40/45 or go above 12.
+            if (max > 12) return false;
+            if (min < 0) return false;
+            return true;
+          }
+
+          function looksLikeMinuteSelect(sel) {
+            var vals = selectOptionNumbers(sel).map(function(v) { return v.n; });
+            if (!vals.length) return false;
+            var max = Math.max.apply(null, vals);
+            if (max > 12 && max <= 59) return true;
+            for (var i = 0; i < vals.length; i++) {
+              if (vals[i] === 15 || vals[i] === 20 || vals[i] === 30 || vals[i] === 40 || vals[i] === 45) return true;
+            }
+            return false;
+          }
+
+          function setSelectOptionIndex(sel, idx) {
+            if (!sel || idx == null || idx < 0 || !sel.options || !sel.options[idx]) return false;
+            var opt = sel.options[idx];
+            var value = opt.value;
+            try {
+              var proto = HTMLSelectElement.prototype;
+              var desc = Object.getOwnPropertyDescriptor(proto, 'value');
+              if (desc && desc.set) desc.set.call(sel, value);
+              else sel.value = value;
+            } catch (e) {
+              sel.value = value;
+            }
+            try { sel.selectedIndex = idx; } catch (e2) {}
+            try { opt.selected = true; } catch (e3) {}
+            sel.dispatchEvent(new Event('input', { bubbles: true }));
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
+            return norm(sel.value) === norm(value) || sel.selectedIndex === idx;
+          }
+
+          function pickDurationCombobox(kindRe, wantNumber) {
+            var want = String(wantNumber);
+            var combos = document.querySelectorAll('[role=\"combobox\"], button[aria-haspopup=\"listbox\"]');
+            var target = null;
+            for (var i = 0; i < combos.length; i++) {
+              var c = combos[i];
+              if (!visible(c)) continue;
+              var meta = ((c.getAttribute('aria-label') || '') + ' ' + (c.id || '') + ' ' + (c.innerText || '')).toLowerCase();
+              if (kindRe.test(meta)) { target = c; break; }
+            }
+            if (!target) return false;
+            if (!click(target, { scroll: false })) return false;
+            var opts = document.querySelectorAll('[role=\"option\"], li[role=\"option\"]');
+            for (var j = 0; j < opts.length; j++) {
+              var opt = opts[j];
+              if (!visible(opt)) continue;
+              var key = norm((opt.getAttribute('data-value') || '') + ' ' + (opt.innerText || ''));
+              var num = parseInt(String(opt.innerText || '').replace(/[^0-9]/g, ''), 10);
+              if (key === norm(want) || num === wantNumber || key.indexOf(norm(want)) !== -1) {
+                return click(opt, { scroll: false });
+              }
+            }
+            return false;
+          }
+
+          function readSelectedNumber(sel) {
+            if (!sel) return null;
+            var opts = selectOptionNumbers(sel);
+            for (var i = 0; i < opts.length; i++) {
+              if (opts[i].idx === sel.selectedIndex) return opts[i].n;
+            }
+            var n = parseInt(String(sel.value).replace(/[^0-9]/g, ''), 10);
+            return isNaN(n) ? null : n;
+          }
+
           function selectGreatestDurationUpToMax() {
-            if (window.__parkingZoneDurationSet) return false;
+            // Allow a few retries — minute change often resets hour in React state.
+            var attempts = window.__parkingZoneDurationAttempts || 0;
+            if (attempts >= 4) return false;
             var maxMin = cfg.maxDurationMinutes || 100;
-            var selects = document.querySelectorAll('select');
+            var selects = [];
+            var all = document.querySelectorAll('select');
+            for (var i = 0; i < all.length; i++) if (visible(all[i])) selects.push(all[i]);
+
             var hourSelect = null;
             var minuteSelect = null;
             var combinedSelect = null;
-            for (var i = 0; i < selects.length; i++) {
-              var s = selects[i];
-              if (!visible(s)) continue;
-              var meta = ((s.getAttribute('aria-label') || '') + ' ' + (s.name || '') + ' ' + (s.id || '') + ' ' + ((s.labels && s.labels[0] && s.labels[0].innerText) || '')).toLowerCase();
+            for (var si = 0; si < selects.length; si++) {
+              var s = selects[si];
+              var meta = ((s.getAttribute('aria-label') || '') + ' ' + (s.name || '') + ' ' + (s.id || '')
+                + ' ' + ((s.labels && s.labels[0] && s.labels[0].innerText) || '')).toLowerCase();
               if (/duration|time|how long|length/.test(meta) && !/hour|minute|min|hr/.test(meta)) {
                 combinedSelect = combinedSelect || s;
               }
               if (/hour|hr\\b/.test(meta)) hourSelect = hourSelect || s;
-              if (/minute|min\\b/.test(meta)) minuteSelect = minuteSelect || s;
+              if (/minute|\\bmin\\b/.test(meta)) minuteSelect = minuteSelect || s;
             }
-            // Unlabeled pair near duration copy: first=hours, second=minutes.
-            if ((!hourSelect || !minuteSelect) && selects.length >= 2) {
-              var visibleSelects = [];
-              for (var v = 0; v < selects.length; v++) if (visible(selects[v])) visibleSelects.push(selects[v]);
-              if (visibleSelects.length >= 2 && /duration|hour|minute|how long/i.test(document.body.innerText || '')) {
-                hourSelect = hourSelect || visibleSelects[0];
-                minuteSelect = minuteSelect || visibleSelects[1];
+
+            // Classify unlabeled selects by option shape (hours 0-12 vs minutes 0/20/40…).
+            if (!hourSelect || !minuteSelect) {
+              for (var ci = 0; ci < selects.length; ci++) {
+                var cand = selects[ci];
+                if (!hourSelect && looksLikeHourSelect(cand) && !looksLikeMinuteSelect(cand)) hourSelect = cand;
+                else if (!minuteSelect && looksLikeMinuteSelect(cand)) minuteSelect = cand;
+              }
+            }
+            // Last resort DOM order only if still missing and shapes agree.
+            if ((!hourSelect || !minuteSelect) && selects.length >= 2
+                && /duration|hour|minute|how long/i.test(document.body.innerText || '')) {
+              if (looksLikeHourSelect(selects[0]) && looksLikeMinuteSelect(selects[1])) {
+                hourSelect = hourSelect || selects[0];
+                minuteSelect = minuteSelect || selects[1];
+              } else if (looksLikeMinuteSelect(selects[0]) && looksLikeHourSelect(selects[1])) {
+                minuteSelect = minuteSelect || selects[0];
+                hourSelect = hourSelect || selects[1];
               }
             }
 
-            if (combinedSelect) {
+            if (combinedSelect && !hourSelect) {
               var bestIdx = -1;
               var bestMins = -1;
               for (var o = 0; o < combinedSelect.options.length; o++) {
                 var opt = combinedSelect.options[o];
                 var mins = parseDurationMinutesFromOption(opt.text, opt.value);
                 if (mins == null) continue;
-                // Treat bare numbers on a combined select as minutes when > 3, else hours.
                 if (/^\\d+$/.test(String(opt.value || '').trim()) && mins <= 3) mins = mins * 60;
                 if (mins <= maxMin && mins > bestMins) {
                   bestMins = mins;
                   bestIdx = o;
                 }
               }
-              if (bestIdx >= 0 && combinedSelect.selectedIndex !== bestIdx) {
-                combinedSelect.selectedIndex = bestIdx;
-                combinedSelect.dispatchEvent(new Event('input', { bubbles: true }));
-                combinedSelect.dispatchEvent(new Event('change', { bubbles: true }));
-                window.__parkingZoneDurationSet = true;
-                return true;
+              if (bestIdx >= 0) {
+                var combinedChanged = setSelectOptionIndex(combinedSelect, bestIdx);
+                if (combinedChanged) {
+                  window.__parkingZoneDurationSet = true;
+                  bridge({ type: 'log', message: 'setDuration combined=' + bestMins + 'm' });
+                  return true;
+                }
               }
             }
 
             if (hourSelect && minuteSelect) {
               var maxH = Math.floor(maxMin / 60);
-              var bestH = -1;
-              var bestM = -1;
-              var hourOpts = [];
-              for (var hi = 0; hi < hourSelect.options.length; hi++) {
-                var hOpt = hourSelect.options[hi];
-                var hVal = parseInt(String(hOpt.value).replace(/[^0-9]/g, ''), 10);
-                if (isNaN(hVal)) hVal = parseInt(String(hOpt.text).replace(/[^0-9]/g, ''), 10);
-                if (!isNaN(hVal) && hVal <= maxH) hourOpts.push({ idx: hi, h: hVal });
-              }
-              hourOpts.sort(function(a, b) { return b.h - a.h; });
+              var hourOpts = selectOptionNumbers(hourSelect).filter(function(v) { return v.n <= maxH; });
+              hourOpts.sort(function(a, b) { return b.n - a.n; });
+              var bestHIdx = -1;
+              var bestMIdx = -1;
+              var bestHVal = -1;
+              var bestMVal = -1;
               for (var k = 0; k < hourOpts.length; k++) {
                 var candH = hourOpts[k];
-                var remain = maxMin - candH.h * 60;
+                var remain = maxMin - candH.n * 60;
                 var localBestM = -1;
                 var localBestIdx = -1;
-                for (var mi = 0; mi < minuteSelect.options.length; mi++) {
-                  var mOpt = minuteSelect.options[mi];
-                  var mVal = parseInt(String(mOpt.value).replace(/[^0-9]/g, ''), 10);
-                  if (isNaN(mVal)) mVal = parseInt(String(mOpt.text).replace(/[^0-9]/g, ''), 10);
-                  if (isNaN(mVal)) continue;
+                var minuteOpts = selectOptionNumbers(minuteSelect);
+                for (var mi = 0; mi < minuteOpts.length; mi++) {
+                  var mVal = minuteOpts[mi].n;
                   if (mVal <= remain && mVal > localBestM) {
                     localBestM = mVal;
-                    localBestIdx = mi;
+                    localBestIdx = minuteOpts[mi].idx;
                   }
                 }
                 if (localBestIdx >= 0) {
-                  bestH = candH.idx;
-                  bestM = localBestIdx;
+                  bestHIdx = candH.idx;
+                  bestHVal = candH.n;
+                  bestMIdx = localBestIdx;
+                  bestMVal = localBestM;
                   break;
                 }
               }
-              if (bestH >= 0 && bestM >= 0) {
-                var changed = false;
-                if (hourSelect.selectedIndex !== bestH) {
-                  hourSelect.selectedIndex = bestH;
-                  hourSelect.dispatchEvent(new Event('input', { bubbles: true }));
-                  hourSelect.dispatchEvent(new Event('change', { bubbles: true }));
-                  changed = true;
+              if (bestHIdx >= 0 && bestMIdx >= 0) {
+                // Set minutes first, then hours — and re-apply hours (React often resets hour on minute change).
+                setSelectOptionIndex(minuteSelect, bestMIdx);
+                setSelectOptionIndex(hourSelect, bestHIdx);
+                setSelectOptionIndex(hourSelect, bestHIdx);
+                var gotH = readSelectedNumber(hourSelect);
+                var gotM = readSelectedNumber(minuteSelect);
+                window.__parkingZoneDurationAttempts = attempts + 1;
+                var total = (gotH != null ? gotH : 0) * 60 + (gotM != null ? gotM : 0);
+                var target = bestHVal * 60 + bestMVal;
+                bridge({
+                  type: 'log',
+                  message: 'setDuration hour=' + gotH + ' min=' + gotM + ' target=' + target + 'm'
+                });
+                if (gotH === bestHVal && gotM === bestMVal) {
+                  window.__parkingZoneDurationSet = true;
+                  return true;
                 }
-                if (minuteSelect.selectedIndex !== bestM) {
-                  minuteSelect.selectedIndex = bestM;
-                  minuteSelect.dispatchEvent(new Event('input', { bubbles: true }));
-                  minuteSelect.dispatchEvent(new Event('change', { bubbles: true }));
-                  changed = true;
+                // Also try combobox UI if native select did not stick.
+                if (gotH !== bestHVal) pickDurationCombobox(/hour|hr/, bestHVal);
+                if (gotM !== bestMVal) pickDurationCombobox(/minute|min/, bestMVal);
+                gotH = readSelectedNumber(hourSelect);
+                gotM = readSelectedNumber(minuteSelect);
+                if (gotH === bestHVal && gotM === bestMVal) {
+                  window.__parkingZoneDurationSet = true;
+                  return true;
                 }
-                window.__parkingZoneDurationSet = true;
-                return changed;
+                // Partial progress (e.g. minutes only) — keep retrying next tick.
+                return gotM === bestMVal || gotH === bestHVal || total >= Math.min(maxMin, 40);
               }
+            }
+
+            // Custom hour/minute comboboxes only.
+            var maxH2 = Math.floor(maxMin / 60);
+            var wantM = maxMin - maxH2 * 60;
+            // Snap minutes to common 20-min blocks used by ParkMobile zones.
+            var minuteSnaps = [0, 20, 40, 15, 30, 45, 10, 50];
+            var snapM = 0;
+            for (var ms = 0; ms < minuteSnaps.length; ms++) {
+              if (minuteSnaps[ms] <= wantM && minuteSnaps[ms] >= snapM) snapM = minuteSnaps[ms];
+            }
+            var comboChanged = false;
+            if (maxH2 > 0) comboChanged = pickDurationCombobox(/hour|hr/, maxH2) || comboChanged;
+            comboChanged = pickDurationCombobox(/minute|min/, snapM) || comboChanged;
+            if (comboChanged) {
+              window.__parkingZoneDurationAttempts = attempts + 1;
+              bridge({ type: 'log', message: 'setDuration combobox hour=' + maxH2 + ' min=' + snapM });
+              return true;
             }
             return false;
           }
 
           function readPrefilledZoneValue() {
-            var inputs = document.querySelectorAll('input[type=\"text\"], input[type=\"search\"], input[type=\"tel\"], input:not([type])');
-            for (var i = 0; i < inputs.length; i++) {
-              var el = inputs[i];
-              if (!visible(el)) continue;
-              var label = ((el.getAttribute('aria-label') || '') + ' ' + (el.name || '') + ' ' + (el.id || '') + ' ' + (el.placeholder || '')).toLowerCase();
-              if (label.indexOf('zone') === -1) continue;
-              var val = String(el.value || '').trim();
-              if (val) return val;
-            }
-            return '';
+            var el = findZoneNumberInput();
+            if (!el) return '';
+            return String(el.value || '').trim();
           }
 
           function zoneEntryFormVisible() {
-            var inputs = document.querySelectorAll('input[type=\"text\"], input[type=\"search\"], input[type=\"tel\"], input:not([type])');
-            for (var i = 0; i < inputs.length; i++) {
-              var el = inputs[i];
-              if (!visible(el)) continue;
-              var label = ((el.getAttribute('aria-label') || '') + ' ' + (el.name || '') + ' ' + (el.id || '') + ' ' + (el.placeholder || '')).toLowerCase();
-              if (label.indexOf('zone') !== -1) return true;
-            }
-            return false;
+            return !!findZoneNumberInput();
           }
 
           function zoneSubmissionErrorVisible() {
@@ -1852,6 +2170,15 @@ enum BookingFormPrefill {
               if (clickParkMobileVehicleContinue() || clickSaveAndContinue()) {
                 return { status: 'advanced', filled: vehicleFilled, action: 'vehicleConfirm' };
               }
+              // Last resort: any Continue-like control on the vehicle page once fields look ready.
+              if (vehicleFormReady()) {
+                var zoneBtn = findZoneContinueButton();
+                if (zoneBtn && forceClickDisabled(zoneBtn)) {
+                  window.__parkingLastSaveAt = Date.now();
+                  bridge({ type: 'log', message: 'vehicle Continue via zone button fallback' });
+                  return { status: 'advanced', filled: vehicleFilled, action: 'vehicleConfirm' };
+                }
+              }
               if (vehicleFilled > 0) {
                 return { status: 'waiting', filled: vehicleFilled, action: 'vehiclePartial' };
               }
@@ -1884,8 +2211,18 @@ enum BookingFormPrefill {
                 bridge({ type: 'log', message: 'zone manual re-submit detected — resuming toward /zone/auth' });
               }
 
-              if (zoneEntryFormVisible() && !readPrefilledZoneValue()) {
-                // Nudge site geo once; stub should make getCurrentPosition return native coords.
+              // Actively resolve nearest zone from native lat/lng (site geo prefill is unreliable in WKWebView).
+              var nearestStatus = fillNearestZoneOnStartPage();
+              if (nearestStatus === 'navigated') {
+                return { status: 'advanced', filled: 0, action: 'pickZone' };
+              }
+              if (nearestStatus === 'filled') {
+                return { status: 'advanced', filled: 1, action: 'fillZone' };
+              }
+              if (isZoneStartPage() && nearestStatus === 'pending') {
+                return { status: 'waiting', filled: 0, action: 'awaitZonePrefill' };
+              }
+              if (isZoneStartPage() && !readPrefilledZoneValue() && !/internalZoneCode=/i.test(location.search || '')) {
                 if (!window.__parkingZoneGeoNudgeAt) {
                   window.__parkingZoneGeoNudgeAt = Date.now();
                   try {
@@ -1893,7 +2230,7 @@ enum BookingFormPrefill {
                       navigator.geolocation.getCurrentPosition(function() {});
                     }
                   } catch (e) {}
-                  bridge({ type: 'log', message: 'awaitZonePrefill — nudged geolocation' });
+                  bridge({ type: 'log', message: 'awaitZonePrefill — waiting for zone #' });
                 }
                 return { status: 'waiting', filled: 0, action: 'awaitZonePrefill' };
               }
@@ -1903,10 +2240,13 @@ enum BookingFormPrefill {
                 return { status: 'waiting', filled: 0, action: 'awaitManualZoneSubmit' };
               }
 
-              // Optional duration step when selectors exist; otherwise keep tapping Continue.
-              if (hasZoneDurationSelectors()) {
+              // Duration step: set hour+minute up to max before Continue (don't skip with minutes-only).
+              if (hasZoneDurationSelectors() && !window.__parkingZoneDurationSet) {
                 if (selectGreatestDurationUpToMax()) {
                   return { status: 'advanced', filled: 0, action: 'setDuration' };
+                }
+                if ((window.__parkingZoneDurationAttempts || 0) < 4) {
+                  return { status: 'waiting', filled: 0, action: 'awaitDuration' };
                 }
               }
 

@@ -4,7 +4,7 @@ Drop HAR exports or request dumps from Web Inspector here (`*.har`, `*.json`).
 
 ## Current entry URL
 
-Zone tab starts at **`https://app.parkmobile.io/zone/start`**. ParkMobile prefills nearest **Zone #** via geolocation. App loops **Continue** (pause on submit errors for manual re-submit) until URL is **`/zone/auth?checkoutState=…`**, then guest/checkout prep runs.
+Zone tab starts at **`https://app.parkmobile.io/zone/start`**. App uses native Core Location + `GET /api/zones/search` to pick the nearest zone (`signageCode` / `internalZoneCode`) — WKWebView geolocation prefill is unreliable. Then loops **Continue** (pause on submit errors) until **`/zone/auth?checkoutState=…`**.
 
 ## Learned from live `/search` (2026-08-03)
 
