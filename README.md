@@ -11,7 +11,7 @@ cp ios/WebAutoParking/Resources/BookingConfig.example.json \
    ios/WebAutoParking/Resources/BookingConfig.json
 ```
 
-Template: [`BookingConfig.example.json`](ios/WebAutoParking/Resources/BookingConfig.example.json). Empty / `...` values are skipped.
+Template: [`BookingConfig.example.json`](ios/WebAutoParking/Resources/BookingConfig.example.json). Top-level **`email`** / **`phone`** are prefilled on zone + garage checkout (overwrites guest temp emails). Empty / `...` values are skipped.
 
 Use **ISO-style codes** for selects when possible (`country`: `US`, `state`: `NJ`). Full names like `United States` / `New Jersey` are normalized on load.
 

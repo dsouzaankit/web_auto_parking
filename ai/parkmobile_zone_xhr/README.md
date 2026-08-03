@@ -36,6 +36,7 @@ Zone tab starts at **`https://app.parkmobile.io/zone/start`**. ParkMobile prefil
 3. Native alert confirms public `zone-id` before activating Park Here.
 4. Duration: greatest hour/minute options ≤ **100 minutes** (1h 40m).
 5. Reuse existing guest → contact → vehicle → Apple Pay prep (no purchase).
+6. `/zone/vehicle` (Add Vehicle): force plate + country + state from `BookingConfig` (overwrite defaults), then Continue.
 
 ## What to export for refinement
 

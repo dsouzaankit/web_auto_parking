@@ -30,7 +30,9 @@ final class LocationService: NSObject, ObservableObject {
         case .notDetermined:
             manager.requestWhenInUseAuthorization()
         case .authorizedAlways, .authorizedWhenInUse:
+            // Warm the provider; requestLocation alone is often slow/empty on first grant.
             manager.requestLocation()
+            manager.startUpdatingLocation()
         default:
             lastError = "Location denied — enable in Settings for nearest zone"
             AppLog.log("Location denied status=\(manager.authorizationStatus.rawValue)")
@@ -43,13 +45,17 @@ final class LocationService: NSObject, ObservableObject {
         requestWhenInUseIfNeeded()
         return await withCheckedContinuation { cont in
             continuation = cont
-            manager.requestLocation()
+            if hasWhenInUse {
+                manager.requestLocation()
+                manager.startUpdatingLocation()
+            }
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
                 if let continuation {
                     self.continuation = nil
                     continuation.resume(returning: self.coordinate)
                 }
+                self.manager.stopUpdatingLocation()
             }
         }
     }
@@ -62,6 +68,7 @@ extension LocationService: CLLocationManagerDelegate {
             AppLog.log("Location auth=\(manager.authorizationStatus.rawValue)")
             if hasWhenInUse {
                 manager.requestLocation()
+                manager.startUpdatingLocation()
             }
         }
     }
@@ -78,6 +85,7 @@ extension LocationService: CLLocationManagerDelegate {
             if let continuation {
                 self.continuation = nil
                 continuation.resume(returning: loc.coordinate)
+                manager.stopUpdatingLocation()
             }
         }
     }

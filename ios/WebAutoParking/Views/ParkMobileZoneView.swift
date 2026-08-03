@@ -5,6 +5,17 @@ import SwiftUI
 struct ParkMobileZoneView: View {
     @StateObject private var location = LocationService()
     @State private var locationReady = false
+    @State private var statusText = "Getting location…"
+
+    private var prefillContext: PrefillContext {
+        PrefillContext(
+            mode: .parkMobileZone,
+            latitude: location.coordinate?.latitude,
+            longitude: location.coordinate?.longitude,
+            maxDurationMinutes: 100,
+            zoneAutomationEnabled: true
+        )
+    }
 
     var body: some View {
         NavigationStack {
@@ -13,22 +24,39 @@ struct ParkMobileZoneView: View {
                     ParkingWebView(
                         title: "ParkMobile Zone",
                         url: FixedDurationURLs.zoneStart,
-                        prefillContext: PrefillContext(
-                            mode: .parkMobileZone,
-                            latitude: location.coordinate?.latitude,
-                            longitude: location.coordinate?.longitude,
-                            maxDurationMinutes: 100,
-                            zoneAutomationEnabled: true
-                        )
+                        prefillContext: prefillContext
                     )
                 } else {
-                    ProgressView("Getting location…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text(statusText)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .task {
+                statusText = "Waiting for location permission…"
                 location.requestWhenInUseIfNeeded()
-                _ = await location.currentCoordinate()
+                // Prefer a real fix before loading /zone/start — site geo in WKWebView is flaky.
+                if let coord = await location.currentCoordinate(timeoutSeconds: 12) {
+                    statusText = String(
+                        format: "Location ready (%.4f, %.4f)",
+                        coord.latitude,
+                        coord.longitude
+                    )
+                    AppLog.log(
+                        String(format: "Zone tab opening with lat=%.5f lng=%.5f",
+                               coord.latitude, coord.longitude)
+                    )
+                } else {
+                    statusText = location.lastError
+                        ?? "No GPS fix yet — opening Zone (native geo stub may arrive later)"
+                    AppLog.log("Zone tab opening without GPS fix status=\(location.authorizationStatus.rawValue)")
+                }
                 locationReady = true
             }
         }

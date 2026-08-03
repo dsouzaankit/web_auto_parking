@@ -102,6 +102,13 @@ struct WebViewRepresentable: UIViewRepresentable {
         config.userContentController.add(context.coordinator, name: Coordinator.bridgeName)
         // Reliable XHR capture for LAN — Safari Web Inspector Network domain is unavailable via iwdp on Windows.
         config.userContentController.addUserScript(XHRCapture.userScript())
+        // ParkMobile zone prefill uses navigator.geolocation; stub with native Core Location.
+        config.userContentController.addUserScript(
+            GeolocationBridge.userScript(
+                latitude: prefillContext.latitude,
+                longitude: prefillContext.longitude
+            )
+        )
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
@@ -114,14 +121,18 @@ struct WebViewRepresentable: UIViewRepresentable {
         }
 
         context.coordinator.bind(webView)
+        context.coordinator.noteInitialGeolocation(prefillContext)
         model.webView = webView
-        AppLog.log("WebView create \(url.absoluteString)")
+        AppLog.log(
+            "WebView create \(url.absoluteString) geo=\(prefillContext.latitude.map { String(format: "%.5f", $0) } ?? "nil"),\(prefillContext.longitude.map { String(format: "%.5f", $0) } ?? "nil")"
+        )
         webView.load(URLRequest(url: url))
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.prefillContext = prefillContext
+        context.coordinator.applyNativeGeolocation(to: webView)
     }
 
     static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
@@ -143,10 +154,37 @@ struct WebViewRepresentable: UIViewRepresentable {
         private var prefillWorkItem: DispatchWorkItem?
         private var autoPrefillAttempts = 0
         private var lastPrefillURL: String?
+        private var lastNativeGeoKey: String?
+        private var createdWithoutNativeGeo = false
+        private var didReloadForNativeGeo = false
 
         init(model: WebViewModel, prefillContext: PrefillContext) {
             self.model = model
             self.prefillContext = prefillContext
+        }
+
+        func noteInitialGeolocation(_ context: PrefillContext) {
+            createdWithoutNativeGeo = context.latitude == nil || context.longitude == nil
+            if let lat = context.latitude, let lng = context.longitude {
+                lastNativeGeoKey = String(format: "%.5f,%.5f", lat, lng)
+            }
+        }
+
+        /// Push Core Location into navigator.geolocation; reload /zone/start once if first load lacked coords.
+        func applyNativeGeolocation(to webView: WKWebView) {
+            guard let lat = prefillContext.latitude, let lng = prefillContext.longitude else { return }
+            let key = String(format: "%.5f,%.5f", lat, lng)
+            webView.evaluateJavaScript(GeolocationBridge.installJS(latitude: lat, longitude: lng), completionHandler: nil)
+            let path = webView.url?.path.lowercased() ?? ""
+            let onZoneStart = path.contains("/zone/start") || path.hasSuffix("/zone") || path.hasSuffix("/zone/")
+            if key != lastNativeGeoKey {
+                lastNativeGeoKey = key
+            }
+            if onZoneStart, createdWithoutNativeGeo, !didReloadForNativeGeo, prefillContext.mode == .parkMobileZone {
+                didReloadForNativeGeo = true
+                AppLog.log("WebView reload for native geolocation stub \(key)")
+                webView.reload()
+            }
         }
 
         func bind(_ webView: WKWebView) {
