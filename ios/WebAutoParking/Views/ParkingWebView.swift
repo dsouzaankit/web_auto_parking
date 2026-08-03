@@ -151,7 +151,8 @@ struct WebViewRepresentable: UIViewRepresentable {
 
         func bind(_ webView: WKWebView) {
             unbind()
-            // Progress + URL — ParkMobile SPA often changes URL without a full reload.
+            // Progress + URL + history — ParkMobile SPA often changes URL via History API
+            // without didFinish, so canGoBack/Forward must be KVO'd (not only nav callbacks).
             observations = [
                 webView.observe(\.estimatedProgress, options: [.new]) { [weak self] view, _ in
                     let progress = view.estimatedProgress
@@ -159,11 +160,17 @@ struct WebViewRepresentable: UIViewRepresentable {
                         self?.publishProgress(progress)
                     }
                 },
+                webView.observe(\.canGoBack, options: [.new]) { [weak self] view, _ in
+                    DispatchQueue.main.async { self?.publishNavigationState(from: view) }
+                },
+                webView.observe(\.canGoForward, options: [.new]) { [weak self] view, _ in
+                    DispatchQueue.main.async { self?.publishNavigationState(from: view) }
+                },
                 webView.observe(\.url, options: [.new]) { [weak self] view, _ in
                     let url = view.url
                     DispatchQueue.main.async {
                         guard let self else { return }
-                        self.model.currentURL = url
+                        self.publishNavigationState(from: view)
                         let key = url?.absoluteString
                         guard let key, key != self.lastPrefillURL else { return }
                         guard BookingFormPrefill.shouldInject(for: url, trigger: .auto) else { return }
