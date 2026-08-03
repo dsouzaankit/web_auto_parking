@@ -1395,32 +1395,59 @@ enum BookingFormPrefill {
             return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
           }
 
+          function cacheZonesSearchPayload(data, via) {
+            var list = Array.isArray(data) ? data
+              : (data && (data.zones || data.results || data.items || data.data)) || [];
+            if (!Array.isArray(list) || !list.length) return;
+            window.__parkingZoneApiResults = list;
+            window.__parkingNearestZoneFetchedAt = Date.now();
+            bridge({ type: 'log', message: 'zones ' + via + ' cached count=' + list.length });
+          }
+
+          /// Cache SPA /api/zones/search — ParkMobile uses XHR; our own fetch often 422s.
           function installZoneFetchHook() {
             if (window.__parkingZoneFetchHooked) return;
             window.__parkingZoneFetchHooked = true;
             window.__parkingZoneApiResults = window.__parkingZoneApiResults || [];
             try {
               var orig = window.fetch;
-              if (typeof orig !== 'function') return;
-              window.fetch = function() {
-                var args = arguments;
-                var req = args[0];
-                var url = (typeof req === 'string') ? req : ((req && req.url) || '');
-                return orig.apply(this, args).then(function(res) {
-                  try {
-                    if (/\\/api\\/zones\\/search/i.test(url) && res && res.clone) {
-                      res.clone().json().then(function(data) {
-                        var list = Array.isArray(data) ? data
-                          : (data && (data.zones || data.results || data.items || data.data)) || [];
-                        if (Array.isArray(list) && list.length) {
-                          window.__parkingZoneApiResults = list;
-                          bridge({ type: 'log', message: 'zones API cached count=' + list.length });
-                        }
-                      }).catch(function() {});
-                    }
-                  } catch (e) {}
-                  return res;
-                });
+              if (typeof orig === 'function') {
+                window.fetch = function() {
+                  var args = arguments;
+                  var req = args[0];
+                  var url = (typeof req === 'string') ? req : ((req && req.url) || '');
+                  return orig.apply(this, args).then(function(res) {
+                    try {
+                      if (/\\/api\\/zones\\/search/i.test(url) && res && res.ok && res.clone) {
+                        res.clone().json().then(function(data) {
+                          cacheZonesSearchPayload(data, 'fetch');
+                        }).catch(function() {});
+                      }
+                    } catch (e) {}
+                    return res;
+                  });
+                };
+              }
+            } catch (e) {}
+            try {
+              var XO = XMLHttpRequest.prototype.open;
+              var XS = XMLHttpRequest.prototype.send;
+              XMLHttpRequest.prototype.open = function(method, url) {
+                try { this.__parkingZoneUrl = String(url || ''); } catch (e) { this.__parkingZoneUrl = ''; }
+                return XO.apply(this, arguments);
+              };
+              XMLHttpRequest.prototype.send = function() {
+                var xhr = this;
+                var url = xhr.__parkingZoneUrl || '';
+                if (/\\/api\\/zones\\/search/i.test(url)) {
+                  xhr.addEventListener('load', function() {
+                    try {
+                      if (xhr.status < 200 || xhr.status >= 300) return;
+                      cacheZonesSearchPayload(JSON.parse(xhr.responseText || 'null'), 'xhr');
+                    } catch (e) {}
+                  });
+                }
+                return XS.apply(this, arguments);
               };
             } catch (e) {}
           }
@@ -1513,7 +1540,14 @@ enum BookingFormPrefill {
               if (label.indexOf('search zones') !== -1 || label.indexOf('search zone') !== -1) {
                 var selected = r.getAttribute('aria-checked') === 'true' || r.checked;
                 if (!selected) {
-                  if (click(r)) return true;
+                  if (click(r)) {
+                    window.__parkingDidTapGeo = false;
+                    window.__parkingGeoTappedAt = 0;
+                    window.__parkingZoneApiResults = [];
+                    window.__parkingNearestZoneCandidate = null;
+                    window.__parkingZoneActivated = false;
+                    return true;
+                  }
                 }
                 return false;
               }
@@ -1537,8 +1571,14 @@ enum BookingFormPrefill {
                   || label.indexOf('current location') !== -1
                   || label.indexOf('my location') !== -1
                   || label === 'locate me') {
+                if (!click(el)) return false;
                 window.__parkingDidTapGeo = true;
-                return click(el);
+                window.__parkingGeoTappedAt = Date.now();
+                // Clear any pre-geo Atlanta/default list so we don't pick a stale zone.
+                window.__parkingZoneApiResults = [];
+                window.__parkingNearestZoneCandidate = null;
+                bridge({ type: 'log', message: 'tapped Get user location' });
+                return true;
               }
             }
             return false;
@@ -1650,77 +1690,29 @@ enum BookingFormPrefill {
             return null;
           }
 
+          /// Do not call /api/zones/search ourselves — live XHR shows our fetch gets HTTP 400/422.
+          /// Rely on SPA Search Zones + Get user location (cached via installZoneFetchHook / DOM).
           function requestNearestZonesFromApi() {
-            if (cfg.lat == null || cfg.lng == null) return false;
-            if (window.__parkingNearestZoneFetching) return true;
-            if (window.__parkingNearestZoneFetchedAt && (Date.now() - window.__parkingNearestZoneFetchedAt) < 15000
-                && (window.__parkingZoneApiResults || []).length) {
+            if ((window.__parkingZoneApiResults || []).length) {
+              window.__parkingNearestZoneFetchedAt = Date.now();
+              var nearest = pickNearestZoneCandidate();
+              if (nearest) window.__parkingNearestZoneCandidate = nearest;
               return true;
             }
-            window.__parkingNearestZoneFetching = true;
-            var lat = Number(cfg.lat);
-            var lng = Number(cfg.lng);
-            var d = 0.02;
-            var upper = (lat + d) + ',' + (lng + d);
-            var lower = (lat - d) + ',' + (lng - d);
-            var url = '/api/zones/search?parkingType=1'
-              + '&upper=' + encodeURIComponent(upper)
-              + '&lower=' + encodeURIComponent(lower)
-              + '&center=' + encodeURIComponent(lat + ',' + lng)
-              + '&maxResults=40&includeServices=true';
-            bridge({ type: 'log', message: 'zones search nearest lat=' + lat + ' lng=' + lng });
-            try {
-              fetch(url, { credentials: 'include' }).then(function(res) {
-                return res.json();
-              }).then(function(data) {
-                var list = Array.isArray(data) ? data
-                  : (data && (data.zones || data.results || data.items || data.data)) || [];
-                window.__parkingZoneApiResults = Array.isArray(list) ? list : [];
-                window.__parkingNearestZoneFetchedAt = Date.now();
-                window.__parkingNearestZoneFetching = false;
-                var nearest = pickNearestZoneCandidate();
-                if (nearest) {
-                  window.__parkingNearestZoneCandidate = nearest;
-                  bridge({
-                    type: 'log',
-                    message: 'nearest zone #' + (nearest.signageCode || nearest.zoneID)
-                      + ' internal=' + (nearest.internalZoneCode || '')
-                      + (nearest.distanceMeters != null ? (' dist=' + Math.round(nearest.distanceMeters) + 'm') : '')
-                  });
-                } else {
-                  bridge({ type: 'log', message: 'nearest zone search empty count=' + (window.__parkingZoneApiResults || []).length });
-                }
-              }).catch(function(err) {
-                window.__parkingNearestZoneFetching = false;
-                bridge({ type: 'log', message: 'nearest zone search error ' + String(err && err.message || err) });
-              });
-            } catch (e) {
-              window.__parkingNearestZoneFetching = false;
-            }
-            return true;
+            return false;
           }
 
-          /// Don't rely on site geolocation — fill Zone # or navigate with internalZoneCode.
+          /// Prefer arriving via /search Park Here. Bare /zone/start has no working self-search API.
           function fillNearestZoneOnStartPage() {
             if (!isZoneStartPage() && !zoneEntryFormVisible()) return null;
             if (/internalZoneCode=/i.test(location.search || '')) {
-              return readPrefilledZoneValue() ? 'ready' : 'ready';
+              return 'ready';
             }
             var existing = readPrefilledZoneValue();
             if (existing) return 'ready';
-            if (cfg.lat == null || cfg.lng == null) {
-              if (!window.__parkingNoGeoLogged) {
-                window.__parkingNoGeoLogged = true;
-                bridge({ type: 'log', message: 'nearest zone skipped — no native lat/lng in prefill context' });
-              }
-              return 'nogeo';
-            }
             requestNearestZonesFromApi();
             var candidate = window.__parkingNearestZoneCandidate || pickNearestZoneCandidate();
-            if (!candidate) return 'pending';
-
-            // Prefer deep link — ParkMobile then loads the zone without depending on the text field.
-            if (candidate.internalZoneCode && !window.__parkingNearestZoneNavigated) {
+            if (candidate && candidate.internalZoneCode && !window.__parkingNearestZoneNavigated) {
               window.__parkingNearestZoneNavigated = true;
               window.__parkingNearestZoneFilled = true;
               try {
@@ -1729,15 +1721,20 @@ enum BookingFormPrefill {
                 return 'navigated';
               } catch (e) {}
             }
-
-            var input = findZoneNumberInput();
-            var code = String(candidate.signageCode || candidate.zoneID || '').trim();
-            if (input && code) {
-              if (setNativeValue(input, code)) {
+            if (candidate) {
+              var input = findZoneNumberInput();
+              var code = String(candidate.signageCode || candidate.zoneID || '').trim();
+              if (input && code && setNativeValue(input, code)) {
                 window.__parkingNearestZoneFilled = true;
                 bridge({ type: 'log', message: 'filled Zone # ' + code });
                 return 'filled';
               }
+            }
+            // Send bare start page through the working /search + geo flow once.
+            if (!window.__parkingRedirectedToSearch) {
+              window.__parkingRedirectedToSearch = true;
+              bridge({ type: 'log', message: 'zone/start empty — redirect /search for SPA nearest zone' });
+              try { location.href = '/search'; return 'navigated'; } catch (e) {}
             }
             return 'pending';
           }
@@ -2112,7 +2109,7 @@ enum BookingFormPrefill {
             installZoneFetchHook();
             ensureNativeGeolocationStub();
 
-            // Legacy /search path (map list) — auto-pick nearest, no native confirm.
+            // /search — SPA owns zones/search XHR; we pick nearest Park Here after geo settles.
             if (isZoneSearchPage()) {
               if (dismissCookieBanner()) {
                 return { status: 'advanced', filled: 0, action: 'cookie' };
@@ -2123,11 +2120,35 @@ enum BookingFormPrefill {
               if (clickGetUserLocation()) {
                 return { status: 'advanced', filled: 0, action: 'geo' };
               }
-              var candidate = pickNearestZoneCandidate();
+              if (!window.__parkingDidTapGeo) {
+                return { status: 'waiting', filled: 0, action: 'awaitGeoButton' };
+              }
+              var geoAge = window.__parkingGeoTappedAt ? (Date.now() - window.__parkingGeoTappedAt) : 0;
+              var apiCount = (window.__parkingZoneApiResults || []).length;
+              var domCount = zoneCandidatesFromDom().length;
+              // Wait for SPA recenter + zones/search before picking (avoid stale default list).
+              if (geoAge < 2800 && !apiCount) {
+                return { status: 'waiting', filled: 0, action: 'awaitZones' };
+              }
+              requestNearestZonesFromApi();
+              var candidate = window.__parkingNearestZoneCandidate || pickNearestZoneCandidate();
               if (!candidate) {
+                if (geoAge < 14000) {
+                  return { status: 'waiting', filled: 0, action: 'awaitZones' };
+                }
+                if (!window.__parkingAwaitZonesLogged) {
+                  window.__parkingAwaitZonesLogged = true;
+                  bridge({ type: 'log', message: 'awaitZones timeout api=' + apiCount + ' dom=' + domCount });
+                }
                 return { status: 'waiting', filled: 0, action: 'awaitZones' };
               }
               if (activateNearestZone(candidate)) {
+                bridge({
+                  type: 'log',
+                  message: 'pickZone #' + (candidate.signageCode || candidate.zoneID)
+                    + ' internal=' + (candidate.internalZoneCode || '')
+                    + (candidate.distanceMeters != null ? (' dist=' + Math.round(candidate.distanceMeters) + 'm') : '')
+                });
                 return { status: 'advanced', filled: 0, action: 'pickZone' };
               }
               return { status: 'waiting', filled: 0, action: 'pickZonePending' };

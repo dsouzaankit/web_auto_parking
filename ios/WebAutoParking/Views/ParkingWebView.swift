@@ -170,17 +170,20 @@ struct WebViewRepresentable: UIViewRepresentable {
             }
         }
 
-        /// Push Core Location into navigator.geolocation; reload /zone/start once if first load lacked coords.
+        /// Push Core Location into navigator.geolocation; reload zone entry once if first load lacked coords.
         func applyNativeGeolocation(to webView: WKWebView) {
             guard let lat = prefillContext.latitude, let lng = prefillContext.longitude else { return }
             let key = String(format: "%.5f,%.5f", lat, lng)
             webView.evaluateJavaScript(GeolocationBridge.installJS(latitude: lat, longitude: lng), completionHandler: nil)
             let path = webView.url?.path.lowercased() ?? ""
-            let onZoneStart = path.contains("/zone/start") || path.hasSuffix("/zone") || path.hasSuffix("/zone/")
+            let onZoneEntry = path.contains("/search")
+                || path.contains("/zone/start")
+                || path.hasSuffix("/zone")
+                || path.hasSuffix("/zone/")
             if key != lastNativeGeoKey {
                 lastNativeGeoKey = key
             }
-            if onZoneStart, createdWithoutNativeGeo, !didReloadForNativeGeo, prefillContext.mode == .parkMobileZone {
+            if onZoneEntry, createdWithoutNativeGeo, !didReloadForNativeGeo, prefillContext.mode == .parkMobileZone {
                 didReloadForNativeGeo = true
                 AppLog.log("WebView reload for native geolocation stub \(key)")
                 webView.reload()

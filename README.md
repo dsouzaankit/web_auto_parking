@@ -1,6 +1,6 @@
 # Web Auto Parking (iOS)
 
-SwiftUI wrapper that opens provider checkout in a `WKWebView`, defaulting to the **last 15-minute mark** start (toggle ASAP / −15m / −30m), with automated guest/contact/vehicle steps on ParkMobile and SpotHero, plus ParkChirp Harbor (sign-in, evening window walk), and a **Zone** tab for ParkMobile `/zone/start` (auto-Continue on site-prefilled zone → duration ≤ 1h 40m when available → Apple Pay prep).
+SwiftUI wrapper that opens provider checkout in a `WKWebView`, defaulting to the **last 15-minute mark** start (toggle ASAP / −15m / −30m), with automated guest/contact/vehicle steps on ParkMobile and SpotHero, plus ParkChirp Harbor (sign-in, evening window walk), and a **Zone** tab for ParkMobile `/search` (nearest zone via SPA geo → duration ≤ 1h 40m → Apple Pay prep).
 
 ## Prefill config (edit by hand)
 
@@ -85,7 +85,7 @@ Presets above are saved by default in that order (existing installs pick up miss
 | Tab | Behavior |
 |-----|----------|
 | **Garages** | Saved facilities → provider checkout (garage automation path) |
-| **Zone** | Opens [`app.parkmobile.io/zone/start`](https://app.parkmobile.io/zone/start). Auto-taps **Continue** (duration ≤ **1h 40m** when selectors exist) until URL is `/zone/auth?checkoutState=…`, then guest → contact → vehicle → Apple Pay prep. |
+| **Zone** | Opens [`app.parkmobile.io/search`](https://app.parkmobile.io/search). **Search Zones** → **Get user location** → nearest **Park Here** → duration ≤ **1h 40m** → Continue until `/zone/auth?checkoutState=…` → guest → contact → vehicle → Apple Pay prep. |
 
 ### Zone flow notes
 
