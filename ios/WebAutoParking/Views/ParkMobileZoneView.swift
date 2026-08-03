@@ -1,7 +1,7 @@
 import CoreLocation
 import SwiftUI
 
-/// ParkMobile `/search` → nearest zone → `/zone/start` → checkout prep (pauses only on submit errors).
+/// ParkMobile `/search` → nearest zone → `/zone/start` (manual zone-id submit) → checkout prep.
 struct ParkMobileZoneView: View {
     @StateObject private var location = LocationService()
     @State private var locationReady = false
@@ -23,7 +23,6 @@ struct ParkMobileZoneView: View {
                 if locationReady {
                     ParkingWebView(
                         title: "ParkMobile Zone",
-                        // SPA's own /api/zones/search works here; direct fetch from /zone/start gets 422.
                         url: FixedDurationURLs.search,
                         prefillContext: prefillContext
                     )
@@ -42,7 +41,6 @@ struct ParkMobileZoneView: View {
             .task {
                 statusText = "Waiting for location permission…"
                 location.requestWhenInUseIfNeeded()
-                // Prefer a real fix before loading /search — WKWebView geo is flaky; stub uses this.
                 if let coord = await location.currentCoordinate(timeoutSeconds: 12) {
                     statusText = String(
                         format: "Location ready (%.4f, %.4f)",

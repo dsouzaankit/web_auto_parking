@@ -12,8 +12,9 @@ Automation:
 2. Tap **Get user location** (native Core Location stubbed into `navigator.geolocation`)
 3. Cache SPA `GET /api/zones/search?parkingType=1&upper=…&lower=…` (XHR — do **not** call this ourselves)
 4. Pick nearest zone (haversine vs native lat/lng, else first Park Here)
-5. **Park Here** → `/zone/start?internalZoneCode=…`
-6. Duration ≤ 1h 40m → Continue through guest/contact/vehicle → Apple Pay prep
+5. **Park Here** → `/zone/start?internalZoneCode=…` (zone-id prefilled)
+6. **You** tap Confirm Zone / Continue on that first zone-id page (automation does not auto-submit it)
+7. Duration ≤ 1h 40m → Continue through guest/contact/vehicle → Apple Pay prep
 
 ## Learned from live XHR (build 41, `/zone/start` attempt)
 

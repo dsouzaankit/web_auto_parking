@@ -1577,6 +1577,7 @@ enum BookingFormPrefill {
                 // Clear any pre-geo Atlanta/default list so we don't pick a stale zone.
                 window.__parkingZoneApiResults = [];
                 window.__parkingNearestZoneCandidate = null;
+                window.__parkingZoneActivated = false;
                 bridge({ type: 'log', message: 'tapped Get user location' });
                 return true;
               }
@@ -2095,6 +2096,19 @@ enum BookingFormPrefill {
             return false;
           }
 
+          /// First checkout page that asks for Zone # — prefill only; user submits Confirm Zone / Continue.
+          function isZoneIdEntryPage() {
+            var path = location.pathname || '';
+            if (/\\/zone\\/(duration|auth|vehicle|contact|payment|confirm|review|summary)/i.test(path)) {
+              return false;
+            }
+            if (hasZoneDurationSelectors()) return false;
+            if (zoneCheckoutStepsVisible()) return false;
+            if (/\\/zone\\/start/i.test(path)) return true;
+            if (zoneEntryFormVisible() && findZoneContinueButton()) return true;
+            return false;
+          }
+
           function zoneCheckoutStepsVisible() {
             if (firstVisible('#email, input[name=\"email\"], input[type=\"email\"]')) return true;
             if (firstVisible('#phone, input[name=\"phone\"], input[type=\"tel\"]')) return true;
@@ -2109,7 +2123,7 @@ enum BookingFormPrefill {
             installZoneFetchHook();
             ensureNativeGeolocationStub();
 
-            // /search — SPA owns zones/search XHR; we pick nearest Park Here after geo settles.
+            // /search — SPA owns zones/search XHR; auto Park Here nearest, then stop on zone-id page.
             if (isZoneSearchPage()) {
               if (dismissCookieBanner()) {
                 return { status: 'advanced', filled: 0, action: 'cookie' };
@@ -2212,6 +2226,33 @@ enum BookingFormPrefill {
                 return { status: 'advanced', filled: 0, action: 'cookie' };
               }
 
+              // Zone-id page: prefill / deep-link nearest zone, but never auto-submit Confirm Zone.
+              if (isZoneIdEntryPage()) {
+                var nearestStatus = fillNearestZoneOnStartPage();
+                if (nearestStatus === 'navigated') {
+                  return { status: 'advanced', filled: 0, action: 'pickZone' };
+                }
+                if (nearestStatus === 'filled') {
+                  return { status: 'advanced', filled: 1, action: 'fillZone' };
+                }
+                if (nearestStatus === 'pending') {
+                  return { status: 'waiting', filled: 0, action: 'awaitZonePrefill' };
+                }
+                if (!window.__parkingZoneIdManualLogged) {
+                  window.__parkingZoneIdManualLogged = true;
+                  bridge({
+                    type: 'log',
+                    message: 'awaitManualZoneIdSubmit — zone ready; not auto-submitting zone-id page'
+                  });
+                }
+                // Stop auto-retry spam; user Confirm Zone / Continue will change URL and restart prefill.
+                return {
+                  status: 'filled',
+                  filled: (readPrefilledZoneValue() || /internalZoneCode=/i.test(location.search || '')) ? 1 : 0,
+                  action: 'awaitManualZoneIdSubmit'
+                };
+              }
+
               // After an auto-submit, detect errors; if present, wait for manual re-submit.
               if (window.__parkingZoneAwaitErrorCheck) {
                 window.__parkingZoneAwaitErrorCheck = false;
@@ -2230,30 +2271,6 @@ enum BookingFormPrefill {
                 window.__parkingZoneAwaitManualSubmit = false;
                 window.__parkingZoneEntrySubmitted = true;
                 bridge({ type: 'log', message: 'zone manual re-submit detected — resuming toward /zone/auth' });
-              }
-
-              // Actively resolve nearest zone from native lat/lng (site geo prefill is unreliable in WKWebView).
-              var nearestStatus = fillNearestZoneOnStartPage();
-              if (nearestStatus === 'navigated') {
-                return { status: 'advanced', filled: 0, action: 'pickZone' };
-              }
-              if (nearestStatus === 'filled') {
-                return { status: 'advanced', filled: 1, action: 'fillZone' };
-              }
-              if (isZoneStartPage() && nearestStatus === 'pending') {
-                return { status: 'waiting', filled: 0, action: 'awaitZonePrefill' };
-              }
-              if (isZoneStartPage() && !readPrefilledZoneValue() && !/internalZoneCode=/i.test(location.search || '')) {
-                if (!window.__parkingZoneGeoNudgeAt) {
-                  window.__parkingZoneGeoNudgeAt = Date.now();
-                  try {
-                    if (navigator.geolocation && navigator.geolocation.getCurrentPosition) {
-                      navigator.geolocation.getCurrentPosition(function() {});
-                    }
-                  } catch (e) {}
-                  bridge({ type: 'log', message: 'awaitZonePrefill — waiting for zone #' });
-                }
-                return { status: 'waiting', filled: 0, action: 'awaitZonePrefill' };
               }
 
               if (zoneSubmissionErrorVisible()) {

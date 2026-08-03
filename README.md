@@ -85,7 +85,7 @@ Presets above are saved by default in that order (existing installs pick up miss
 | Tab | Behavior |
 |-----|----------|
 | **Garages** | Saved facilities → provider checkout (garage automation path) |
-| **Zone** | Opens [`app.parkmobile.io/search`](https://app.parkmobile.io/search). **Search Zones** → **Get user location** → nearest **Park Here** → duration ≤ **1h 40m** → Continue until `/zone/auth?checkoutState=…` → guest → contact → vehicle → Apple Pay prep. |
+| **Zone** | Opens [`app.parkmobile.io/search`](https://app.parkmobile.io/search). **Search Zones** → **Get user location** → nearest **Park Here** → you tap **Confirm Zone** on the zone-id page → automation resumes (duration ≤ **1h 40m** → guest → contact → vehicle → Apple Pay prep). |
 
 ### Zone flow notes
 
