@@ -432,18 +432,33 @@ enum BookingFormPrefill {
             return false;
           }
 
+          function vehiclePlateInput() {
+            return firstVisible(
+              '#vrn, input[name=\"vrn\"], #licensePlate, #license-plate, #plate, input[name*=\"plate\" i], input[id*=\"plate\" i], input[name*=\"license\" i], input[name*=\"lpn\" i], [data-testid=\"Vehicle-input-plate\"], [data-pmtest-id*=\"vehicle\"][data-pmtest-id*=\"plate\"], [data-pmtest-id*=\"license\"], input[autocomplete=\"off\"][maxlength]'
+            );
+          }
+
+          function vehiclePlateMatches() {
+            var plateEl = vehiclePlateInput();
+            if (!plateEl) return false;
+            var cur = String(plateEl.value || '').trim();
+            if (!cur) return false;
+            if (cfg.licensePlateNumber && norm(cur) !== norm(cfg.licensePlateNumber)) return false;
+            return true;
+          }
+
           /// Force plate + country + state from BookingConfig (overwrite wrong defaults like AL / partial plate).
-          function fillParkMobileVehicleFields() {
+          function fillParkMobileVehicleFields(opts) {
+            var force = !!(opts && opts.force);
             var filled = 0;
             if (cfg.licensePlateNumber) {
-              var plateEl = firstVisible(
-                '#vrn, input[name=\"vrn\"], #licensePlate, #license-plate, #plate, input[name*=\"plate\" i], input[id*=\"plate\" i], input[name*=\"license\" i], input[name*=\"lpn\" i], [data-testid=\"Vehicle-input-plate\"], [data-pmtest-id*=\"vehicle\"][data-pmtest-id*=\"plate\"], [data-pmtest-id*=\"license\"]'
-              );
+              var plateEl = vehiclePlateInput();
               if (plateEl) {
                 var curPlate = String(plateEl.value || '').trim();
-                if (norm(curPlate) !== norm(cfg.licensePlateNumber)
+                if ((force || norm(curPlate) !== norm(cfg.licensePlateNumber))
                     && setNativeValue(plateEl, cfg.licensePlateNumber)) {
                   filled += 1;
+                  nudgeVehicleFormValidation(plateEl);
                 }
               }
             }
@@ -451,25 +466,48 @@ enum BookingFormPrefill {
               var countryEl = firstVisible(
                 'select#country, select[name=\"country\"], select[name*=\"country\" i], select[id*=\"country\" i], [data-testid=\"Vehicle-input-country\"]'
               );
-              if (countryEl && !selectMatchesValue(countryEl, cfg.country)
+              if (countryEl && (force || !selectMatchesValue(countryEl, cfg.country))
                   && setNativeValue(countryEl, cfg.country)) {
                 filled += 1;
               } else if (!countryEl) {
-                filled += pickComboboxOption(/country|nation/i, cfg.country) ? 1 : 0;
+                var countryCombo = comboboxDisplayMatches(/country|nation/i, cfg.country);
+                if (force || !countryCombo) {
+                  filled += pickComboboxOption(/country|nation/i, cfg.country) ? 1 : 0;
+                }
               }
             }
             if (cfg.state) {
               var stateEl = firstVisible(
                 'select#state, select[name=\"state\"], select[name*=\"state\" i], select[id*=\"state\" i], select[name*=\"province\" i], [data-testid=\"Vehicle-input-state\"]'
               );
-              if (stateEl && !selectMatchesValue(stateEl, cfg.state)
+              if (stateEl && (force || !selectMatchesValue(stateEl, cfg.state))
                   && setNativeValue(stateEl, cfg.state)) {
                 filled += 1;
               } else if (!stateEl) {
-                filled += pickComboboxOption(/state|province/i, cfg.state) ? 1 : 0;
+                var stateCombo = comboboxDisplayMatches(/state|province/i, cfg.state);
+                if (force || !stateCombo) {
+                  filled += pickComboboxOption(/state|province/i, cfg.state) ? 1 : 0;
+                }
               }
             }
             return filled;
+          }
+
+          function comboboxDisplayMatches(labelRe, value) {
+            if (!value) return false;
+            var want = norm(value);
+            var combos = document.querySelectorAll('[role=\"combobox\"], button[aria-haspopup=\"listbox\"]');
+            for (var i = 0; i < combos.length; i++) {
+              var c = combos[i];
+              if (!visible(c)) continue;
+              var meta = ((c.getAttribute('aria-label') || '') + ' ' + (c.id || '') + ' ' + (c.name || '')).replace(/\\s+/g, ' ');
+              if (!labelRe.test(meta) && !labelRe.test(c.innerText || '')) continue;
+              var shown = norm((c.innerText || '') + ' ' + (c.getAttribute('aria-label') || '') + ' ' + (c.value || ''));
+              if (shown.indexOf(want) !== -1) return true;
+              if (want === 'nj' && shown.indexOf('newjersey') !== -1) return true;
+              if (want === 'us' && (shown.indexOf('unitedstates') !== -1 || shown === 'usa')) return true;
+            }
+            return false;
           }
 
           function pickComboboxOption(labelRe, value) {
@@ -556,16 +594,66 @@ enum BookingFormPrefill {
             return fallback;
           }
 
+          function logVehicleFormDiagnostics() {
+            if (window.__parkingVehicleDiagLogged) return;
+            window.__parkingVehicleDiagLogged = true;
+            var plate = vehiclePlateInput();
+            var country = firstVisible('select#country, select[name=\"country\"], select[name*=\"country\" i]');
+            var state = firstVisible('select#state, select[name=\"state\"], select[name*=\"state\" i]');
+            var btn = findParkMobileVehicleContinueButton() || findZoneContinueButton();
+            bridge({
+              type: 'log',
+              message: 'vehicleDiag plate=' + (plate ? String(plate.value || '').trim() : 'missing')
+                + ' countrySel=' + (country ? (country.value || '') : 'none')
+                + ' stateSel=' + (state ? (state.value || '') : 'none')
+                + ' ready=' + (!!vehicleFormReady())
+                + ' btn=' + (btn ? ((btn.innerText || '').trim().slice(0, 24) + (btn.disabled ? ':disabled' : '')) : 'missing')
+            });
+          }
+
+          /// Zone /vehicle: plate match is enough to force Continue (React often leaves selects flaky).
+          function clickZoneVehicleContinueAggressive() {
+            var now = Date.now();
+            if (window.__parkingLastSaveAt && (now - window.__parkingLastSaveAt) < 2200) return false;
+            if (!vehiclePlateMatches()) return false;
+            var plate = vehiclePlateInput();
+            nudgeVehicleFormValidation(plate);
+            var btn = findParkMobileVehicleContinueButton() || findZoneContinueButton();
+            if (!btn) {
+              if (!window.__parkingVehicleContinueMissLogged) {
+                window.__parkingVehicleContinueMissLogged = true;
+                bridge({ type: 'log', message: 'vehicle Continue button not found (zone)' });
+              }
+              return false;
+            }
+            if (!forceClickDisabled(btn)) return false;
+            window.__parkingLastSaveAt = now;
+            bridge({ type: 'log', message: 'vehicle Continue forced (zone)' });
+            return true;
+          }
+
+          function hasLabeledCombobox(labelRe) {
+            var combos = document.querySelectorAll('[role=\"combobox\"], button[aria-haspopup=\"listbox\"]');
+            for (var i = 0; i < combos.length; i++) {
+              if (!visible(combos[i])) continue;
+              var meta = ((combos[i].getAttribute('aria-label') || '') + ' ' + (combos[i].innerText || '')).toLowerCase();
+              if (labelRe.test(meta)) return true;
+            }
+            return false;
+          }
+
           function vehicleFormReady() {
-            var plate = firstVisible(
-              '#vrn, input[name=\"vrn\"], #licensePlate, input[name*=\"plate\" i], input[id*=\"plate\" i]'
-            );
+            var plate = vehiclePlateInput();
             if (!plate || !visible(plate) || !String(plate.value || '').trim()) return null;
             if (cfg.licensePlateNumber && norm(String(plate.value || '')) !== norm(cfg.licensePlateNumber)) return null;
             var country = firstVisible('select#country, select[name=\"country\"], select[name*=\"country\" i]');
             var state = firstVisible('select#state, select[name=\"state\"], select[name*=\"state\" i], select[name*=\"province\" i]');
             if (cfg.country && country && visible(country) && !selectMatchesValue(country, cfg.country)) return null;
             if (cfg.state && state && visible(state) && !selectMatchesValue(state, cfg.state)) return null;
+            if (cfg.country && !country && hasLabeledCombobox(/country|nation/i)
+                && !comboboxDisplayMatches(/country|nation/i, cfg.country)) return null;
+            if (cfg.state && !state && hasLabeledCombobox(/state|province/i)
+                && !comboboxDisplayMatches(/state|province/i, cfg.state)) return null;
             return { plate: plate, country: country, state: state };
           }
 
@@ -2201,11 +2289,19 @@ enum BookingFormPrefill {
               if (clickParkMobileAddVehicle()) {
                 return { status: 'advanced', filled: contactOnVehicle, action: 'vehicleAdd' };
               }
-              var vehicleFilled = fillParkMobileVehicleFields() + contactOnVehicle;
-              if (clickParkMobileVehicleContinue() || clickSaveAndContinue()) {
+              // Re-apply fields (React often resets country/state after first paint).
+              var forceFill = !window.__parkingZoneVehicleForced
+                  || ((window.__parkingZoneVehicleForceAt || 0) + 4000 < Date.now());
+              if (forceFill) {
+                window.__parkingZoneVehicleForced = true;
+                window.__parkingZoneVehicleForceAt = Date.now();
+              }
+              var vehicleFilled = fillParkMobileVehicleFields({ force: forceFill }) + contactOnVehicle;
+              logVehicleFormDiagnostics();
+              if (clickParkMobileVehicleContinue() || clickSaveAndContinue()
+                  || clickZoneVehicleContinueAggressive()) {
                 return { status: 'advanced', filled: vehicleFilled, action: 'vehicleConfirm' };
               }
-              // Last resort: any Continue-like control on the vehicle page once fields look ready.
               if (vehicleFormReady()) {
                 var zoneBtn = findZoneContinueButton();
                 if (zoneBtn && forceClickDisabled(zoneBtn)) {
@@ -2217,7 +2313,7 @@ enum BookingFormPrefill {
               if (vehicleFilled > 0) {
                 return { status: 'waiting', filled: vehicleFilled, action: 'vehiclePartial' };
               }
-              return { status: 'waiting', filled: 0, action: 'awaitVehicle' };
+              return { status: 'waiting', filled: vehiclePlateMatches() ? 1 : 0, action: 'awaitVehicle' };
             }
 
             // Loop Continue (and pause on errors) until auth+checkoutState URL.
