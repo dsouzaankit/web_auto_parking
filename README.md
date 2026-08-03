@@ -42,21 +42,23 @@ On checkout / login-to-checkout pages, the WebView will:
 ## LAN logs (Wi‑Fi)
 
 1. Phone and PC on the same Wi‑Fi; allow **Local Network** when prompted.
-2. Open **`http://<phone-ip>:8765/`** (prefer IP on Windows) or **`/logs.txt`**.
+2. Open **`http://<phone-ip>:8765/`** (prefer IP on Windows), **`/logs.txt`**, or **`/xhr.txt`**.
 3. Toggle under **Garages → LAN logs**. Bonjour name: `webautoparking._http._tcp`.
 4. Log file is **cleared on each app launch** (cold start), then starts with `App launch v… build …`.
 
 Useful log lines: `Prefill inject`, `Prefill JS {"status":"advanced|filled|waiting",...}`, `action":"awaitZonePrefill|awaitManualZoneSubmit|awaitZoneAuth|zoneContinue|setDuration|searchZonesMode|geo|pickZone|reserve|guest|awaitSignIn|autofillHint|loginSubmit|setTimes|awaitCheckout|saveContinue|vehicleAdd|vehicleConfirm|applePay|acknowledge"`.
 
+**XHR capture (preferred on Windows):** the app hooks `fetch` / `XMLHttpRequest` in the WebView and writes request/response bodies to **`/xhr.txt`** (summaries also appear as `XHR …` lines in `/logs.txt`). Use this instead of the Web Inspector Network panel.
+
 ## WebView inspector (Windows, USB)
 
-Inspect in-app `WKWebView` network/XHR (Safari Web Inspector via [`ios-safari-remote-debug-kit`](https://github.com/HimbeersaftLP/ios-safari-remote-debug-kit)):
+Safari Web Inspector via [`ios-safari-remote-debug-kit`](https://github.com/HimbeersaftLP/ios-safari-remote-debug-kit) is useful for DOM/console, but on Windows **`ios-webkit-debug-proxy` usually does not expose the Network domain** (`Network was not found` / no XHR). Prefer **`/xhr.txt`** above for API learning.
 
-1. App already sets `webView.isInspectable = true` (iOS 16.4+) — rebuild/redeploy after pulling that change.
+1. App sets `webView.isInspectable = true` (iOS 16.4+).
 2. Phone: **Settings → Safari → Advanced → Web Inspector** on; USB + trust in **Apple Devices**.
-3. From `P:\all_scripts\iOS apps\env_setup`: run `.\start-ios-webview-debug.ps1` (first-time generate: `.\setup-ios-webview-debug.ps1`).
-4. Open **Zone** or a garage in the app, then pick the page at `http://localhost:9222/` and open `http://localhost:8080/Main.html?ws=localhost:9222/devtools/page/N`.
-5. Optional: save HAR / zone XHR dumps under [`ai/parkmobile_zone_xhr/`](ai/parkmobile_zone_xhr/) for automation tweaks.
+3. From `P:\all_scripts\iOS apps\env_setup`: run `.\start-ios-webview-debug.ps1` (first-time: `.\setup-ios-webview-debug.ps1`).
+4. Open a page in the app, pick it at `http://localhost:9222/`, then `http://localhost:8080/Main.html?ws=localhost:9222/devtools/page/N`.
+5. If the inspector shows **Internal Error** / `Program` TypeError, close extra inspector tabs (only one client per page), regenerate protocol for your iOS major version, or skip Network and use `/xhr.txt`.
 
 ## Providers
 

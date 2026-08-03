@@ -354,6 +354,10 @@ enum LANLogServer {
             let text = AppLog.readAllText()
             let body = method == "HEAD" ? Data() : Data(text.utf8)
             sendResponse(connection: connection, status: 200, contentType: "text/plain; charset=utf-8", body: body, done: done)
+        case "/xhr.txt", "/xhr":
+            let text = XHRCapture.readAllText()
+            let body = method == "HEAD" ? Data() : Data(text.utf8)
+            sendResponse(connection: connection, status: 200, contentType: "text/plain; charset=utf-8", body: body, done: done)
         default:
             sendResponse(connection: connection, status: 404, contentType: "text/plain", body: Data("Not found".utf8), done: done)
         }
@@ -385,9 +389,9 @@ enum LANLogServer {
         </style>
         </head><body>
         <h1>Parking — LAN logs</h1>
-        <p class="muted">Port \(defaultPort) · plain text: <a href="/logs.txt">/logs.txt</a></p>
+        <p class="muted">Port \(defaultPort) · <a href="/logs.txt">/logs.txt</a> · <a href="/xhr.txt">/xhr.txt</a></p>
         <p>IP: <code>\(ipLine)</code><br/>mDNS: <code>\(hostLine)</code></p>
-        <p class="toolbar"><a href="/">Refresh</a></p>
+        <p class="toolbar"><a href="/">Refresh</a> · <a href="/xhr.txt">XHR capture</a></p>
         <pre id="log">\(log)</pre>
         </body></html>
         """

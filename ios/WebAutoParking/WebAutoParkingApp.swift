@@ -8,6 +8,7 @@ struct WebAutoParkingApp: App {
     init() {
         AppLog.clear()
         AppLog.ensureReady()
+        XHRCapture.clear()
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
         AppLog.log("App launch v\(version) build \(build) prefillAuto=\(BookingFormPrefill.autoInjectEnabled)")

@@ -100,6 +100,8 @@ struct WebViewRepresentable: UIViewRepresentable {
         // Isolate from other WebViews so one bad page cannot take down every tab.
         config.processPool = WKProcessPool()
         config.userContentController.add(context.coordinator, name: Coordinator.bridgeName)
+        // Reliable XHR capture for LAN — Safari Web Inspector Network domain is unavailable via iwdp on Windows.
+        config.userContentController.addUserScript(XHRCapture.userScript())
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
@@ -195,8 +197,30 @@ struct WebViewRepresentable: UIViewRepresentable {
                 if type == "log" {
                     let text = body["message"] as? String ?? "\(body)"
                     AppLog.log("Prefill bridge \(text)")
+                } else if type == "xhr" {
+                    let method = body["method"] as? String ?? "?"
+                    let url = body["url"] as? String ?? "?"
+                    let status = intValue(body["status"])
+                    let ms = intValue(body["ms"])
+                    let kind = body["kind"] as? String ?? "xhr"
+                    let req = body["requestBody"] as? String ?? ""
+                    let res = body["responseBody"] as? String ?? ""
+                    let line = "XHR \(kind) \(method) \(status) \(ms)ms \(url)"
+                    AppLog.log(line)
+                    var detail = line
+                    if !req.isEmpty { detail += "\n  req: \(req)" }
+                    if !res.isEmpty { detail += "\n  res: \(res)" }
+                    XHRCapture.append(detail)
                 }
             }
+        }
+
+        private func intValue(_ any: Any?) -> Int {
+            if let n = any as? Int { return n }
+            if let n = any as? Int64 { return Int(n) }
+            if let n = any as? Double { return Int(n) }
+            if let n = any as? NSNumber { return n.intValue }
+            return 0
         }
 
         private func scheduleAutoPrefill(for webView: WKWebView) {
