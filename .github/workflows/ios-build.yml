@@ -100,13 +100,39 @@ jobs:
           }
 
           verify_ipa_bundle_id() {
-            local plist_path
+            local plist_path appicon_car icon_name icon_files
+            rm -rf ipa-verify
             unzip -q WebAutoParking.ipa -d ipa-verify
             plist_path="$(find ipa-verify -path '*/WebAutoParking.app/Info.plist' | head -1)"
             BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist_path")"
             echo "CFBundleIdentifier=$BUNDLE_ID"
             if [[ -z "$BUNDLE_ID" || "$BUNDLE_ID" == *'$'* ]]; then
               echo "ERROR: Missing CFBundleIdentifier in IPA."
+              exit 1
+            fi
+            appicon_car="$(find ipa-verify -path '*/WebAutoParking.app/Assets.car' -print | head -1)"
+            if [[ -z "$appicon_car" ]]; then
+              echo "ERROR: Assets.car missing from IPA (AppIcon will be blank)"
+              exit 1
+            fi
+            echo "OK: Assets.car in IPA at $appicon_car"
+            icon_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$plist_path" 2>/dev/null || true)"
+            if [[ -z "$icon_name" ]]; then
+              icon_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName' "$plist_path" 2>/dev/null || true)"
+            fi
+            echo "CFBundleIconName=${icon_name:-<missing>}"
+            if [[ "$icon_name" != "AppIcon" ]]; then
+              echo "ERROR: CFBundleIconName must be AppIcon (got '${icon_name:-empty}')"
+              exit 1
+            fi
+            icon_files="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconFiles:0' "$plist_path" 2>/dev/null || true)"
+            echo "CFBundleIconFiles[0]=${icon_files:-<missing>}"
+            if [[ -z "$icon_files" ]]; then
+              echo "ERROR: CFBundleIconFiles missing (Control Center Open App needs loose AppIcon60x60)"
+              exit 1
+            fi
+            if ! find ipa-verify -path '*/WebAutoParking.app/AppIcon60x60@2x.png' | grep -q .; then
+              echo "ERROR: AppIcon60x60@2x.png missing from IPA"
               exit 1
             fi
             rm -rf ipa-verify

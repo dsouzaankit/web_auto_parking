@@ -12,11 +12,11 @@ targets:
     type: application
     platform: iOS
     sources:
+      # Assets.xcassets lives under WebAutoParking/ (not Resources/) — same as Loop Segments.
+      # Do not also list it as buildPhase: resources (that broke Control Center icon resolution).
       - path: WebAutoParking
         excludes:
           - Resources
-      - path: WebAutoParking/Assets.xcassets
-        buildPhase: resources
       - path: WebAutoParking/Resources/BookingConfig.json
         buildPhase: resources
         type: file
@@ -31,7 +31,7 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         PRODUCT_BUNDLE_IDENTIFIER: com.webautoparking.app
         MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "58"
+        CURRENT_PROJECT_VERSION: "59"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        TARGETED_DEVICE_FAMILY: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MACCATALYST: NO

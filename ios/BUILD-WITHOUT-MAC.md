@@ -19,7 +19,7 @@ Optional signed builds: set secrets `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `
 
 Workflow: [`.github/workflows/ios-build.yml`](../.github/workflows/ios-build.yml).
 
-App icon: single `AppIcon.appiconset/AppIcon.png` (1024) + `CFBundleIconName` in Info.plist — same pattern as Loop Segments (multi-size catalog regressed Control Center / loose icon PNGs).
+App icon: same packaging as Loop Segments — single `AppIcon.appiconset/AppIcon.png` (1024), `CFBundleIconName`, `TARGETED_DEVICE_FAMILY: "1,2"`, catalog via main target sources (not a separate `resources` entry). After icon changes: **delete Parking on the phone**, then install the new IPA (SpringBoard/Control Center cache blanks).
 
 ## Install (AltStore)
 
