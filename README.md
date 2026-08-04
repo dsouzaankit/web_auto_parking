@@ -102,8 +102,8 @@ See [ios/BUILD-WITHOUT-MAC.md](ios/BUILD-WITHOUT-MAC.md). Short path:
 
 1. Push to `master` (or **Actions → ios-build → Run workflow** — IPA only builds on `workflow_dispatch`)
 2. Download **`WebAutoParking-ipa`**
-3. Run **`.\deploy.ps1`** — injects your local `BookingConfig.json` into the IPA and copies a timestamped file to iCloud Drive Downloads
-4. Install via **AltStore → My Apps → +**
+3. Run **`.\deploy.ps1`** — injects `BookingConfig.json`, strips broken `_CodeSignature`, overwrites iCloud `WebAutoParking.ipa` (removes old timestamped copies)
+4. Install via **AltStore → My Apps → +** (force-quit/reopen AltStore if **incorrect/invalid format**; else **AltServer Sideload**)
 
 CI ships the example config; personal installs need step 3 (or the IPA will prefill placeholders).
 
