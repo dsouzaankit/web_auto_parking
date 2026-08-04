@@ -2011,7 +2011,8 @@ enum BookingFormPrefill {
             return null;
           }
 
-          /// Hint iOS WKWebView numeric keypad on Zone # (don't change type — React often owns it).
+          /// Hint iOS numeric keypad on Zone #. Do NOT set pattern=[0-9]* —
+          /// that forces the locked number pad with no ABC/globe switch.
           function nudgeZoneIdNumericKeypad(el) {
             el = el || findZoneNumberInput();
             if (!el) return false;
@@ -2021,9 +2022,9 @@ enum BookingFormPrefill {
                 el.setAttribute('inputmode', 'numeric');
                 changed = true;
               }
-              // Classic iOS Safari hint for a digits pad on type=text.
-              if (el.getAttribute('pattern') !== '[0-9]*') {
-                el.setAttribute('pattern', '[0-9]*');
+              // Drop any prior lock-to-number-pad pattern (ours or SPA).
+              if (el.getAttribute('pattern') === '[0-9]*' || el.getAttribute('pattern') === '\\d*') {
+                el.removeAttribute('pattern');
                 changed = true;
               }
               if (el.getAttribute('enterkeyhint') !== 'done') {
@@ -2032,7 +2033,7 @@ enum BookingFormPrefill {
               }
               if (changed && !window.__parkingZoneKeypadNudged) {
                 window.__parkingZoneKeypadNudged = true;
-                bridge({ type: 'log', message: 'zoneId keypad nudge inputmode=numeric pattern=[0-9]*' });
+                bridge({ type: 'log', message: 'zoneId keypad nudge inputmode=numeric (no pattern lock)' });
               }
               return changed;
             } catch (e) {

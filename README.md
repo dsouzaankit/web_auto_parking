@@ -85,7 +85,7 @@ Presets above are saved by default in that order (existing installs pick up miss
 | Tab | Behavior |
 |-----|----------|
 | **Garages** | Saved facilities → provider checkout (garage automation path) |
-| **Zone** | Opens [`app.parkmobile.io/search`](https://app.parkmobile.io/search). **Search Zones** → **Get user location** → nearest **Park Here** → you tap **Confirm Zone** on the zone-id page (Zone # gets `inputmode=numeric` / `pattern=[0-9]*` for the iOS number pad) → automation resumes (duration ≤ **2h** → guest → contact → vehicle → Apple Pay prep). |
+| **Zone** | Opens [`app.parkmobile.io/search`](https://app.parkmobile.io/search). **Search Zones** → **Get user location** → nearest **Park Here** → you tap **Confirm Zone** on the zone-id page (Zone # gets `inputmode=numeric` so the number pad opens first; ABC/globe still switches to full keyboard — no `pattern=[0-9]*` lock) → automation resumes (duration ≤ **2h** → guest → contact → vehicle → Apple Pay prep). |
 
 ### Zone flow notes
 
@@ -102,7 +102,7 @@ See [ios/BUILD-WITHOUT-MAC.md](ios/BUILD-WITHOUT-MAC.md). Short path:
 
 1. Push to `master` (or **Actions → ios-build → Run workflow** — IPA only builds on `workflow_dispatch`)
 2. Download **`WebAutoParking-ipa`**
-3. Run **`.\deploy.ps1`** — injects `BookingConfig.json`, strips broken `_CodeSignature`, overwrites iCloud `WebAutoParking.ipa` (removes old timestamped copies)
+3. Run **`.\deploy.ps1`** — injects `BookingConfig.json`, strips broken `_CodeSignature`, copies timestamped `WebAutoParking-b{build}-{timestamp}.ipa` to iCloud Downloads (removes older copies)
 4. Install via **AltStore → My Apps → +** (force-quit/reopen AltStore if **incorrect/invalid format**; else **AltServer Sideload**)
 
 CI ships the example config; personal installs need step 3 (or the IPA will prefill placeholders).

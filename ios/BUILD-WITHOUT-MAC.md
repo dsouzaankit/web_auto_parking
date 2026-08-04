@@ -13,7 +13,7 @@ Same approach as [`ios_3d_loop_segments`](../../ios_3d_loop_segments/ios/BUILD-W
 powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 ```
 
-That overwrites `WebAutoParking.ipa` in `%USERPROFILE%\iCloudDrive\Downloads` (or `C:\Users\dsouzaankit\iCloudDrive\Downloads` when present), injects local `BookingConfig.json`, and strips `_CodeSignature` so AltStore can re-sign. Timestamped copies are removed.
+That copies a timestamped `WebAutoParking-b{build}-{yyyyMMdd-HHmmss}.ipa` to `%USERPROFILE%\iCloudDrive\Downloads` (or `C:\Users\dsouzaankit\iCloudDrive\Downloads` when present), injects local `BookingConfig.json`, strips `_CodeSignature` so AltStore can re-sign, and removes older `WebAutoParking*.ipa` copies.
 
 Optional signed builds: set secrets `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`. Without them the IPA is unsigned and AltStore re-signs with your Apple ID.
 
@@ -22,7 +22,7 @@ Workflow: [`.github/workflows/ios-build.yml`](../.github/workflows/ios-build.yml
 ## Install (AltStore)
 
 1. AltServer on PC + AltStore on phone (same Wi‑Fi; free Apple ID).
-2. On the **iPhone**: **AltStore → My Apps → +** → pick `WebAutoParking.ipa` from iCloud Downloads. If AltStore says **invalid format** / **incorrect format**: force-quit and reopen AltStore, wait for full iCloud sync, then retry; if it still fails, **AltServer → Sideload** the same file from the PC.
+2. On the **iPhone**: **AltStore → My Apps → +** → pick the timestamped IPA from iCloud Downloads. If AltStore says **invalid format** / **incorrect format**: force-quit and reopen AltStore, wait for full iCloud sync, then retry; if it still fails, **AltServer → Sideload** the same file from the PC.
 3. Wait until Files shows the **full size** before installing from iCloud.
 4. **Settings → General → VPN & Device Management** → Trust your Apple ID (first install).
 5. Free Apple ID cert lasts ~7 days — **Refresh** in AltStore before expiry (no new IPA; retry if that flakes — same error string, different cause).

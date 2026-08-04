@@ -5,7 +5,7 @@
 # Deploy workflow:
 #   1. Build/download IPA (gh workflow / Actions artifact)
 #   2. Run:  .\deploy.ps1
-#   3. On iPhone: AltStore -> My Apps -> + -> pick WebAutoParking.ipa from
+#   3. On iPhone: AltStore -> My Apps -> + -> pick the timestamped IPA from
 #      Files -> iCloud Drive -> Downloads
 #      Or AltServer Sideload of ios\build artifacts\ipa\WebAutoParking.prepared.ipa
 #
@@ -30,7 +30,8 @@ if (Test-Path -LiteralPath $ProjectSpecPath) {
         $BuildNumber = $match.Matches[0].Groups["build"].Value
     }
 }
-$DestIpaName = "WebAutoParking.ipa"
+$Timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$DestIpaName = "WebAutoParking-b$BuildNumber-$Timestamp.ipa"
 $DestIpa = Join-Path $ICloudDownloads $DestIpaName
 $PreparedIpa = Join-Path $ProjectRoot "ios\build artifacts\ipa\WebAutoParking.prepared.ipa"
 
