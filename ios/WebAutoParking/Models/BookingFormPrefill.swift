@@ -1425,47 +1425,21 @@ enum BookingFormPrefill {
             return (now - snap.at) >= 1200;
           }
 
-          /// Hint iOS Password AutoFill (QuickType / key icon). Do not JS-fill email at first —
-          /// an empty username field is what lets Keychain offer parkchirp.com credentials.
+          /// Prepare Cognito login for Keychain. Do NOT JS-focus or JS-fill email —
+          /// programmatic focus dismisses the Passwords bar; only a real tap shows it in WKWebView.
           function hintParkChirpPasswordAutofill() {
             if (!isParkChirp() || parkChirpIsSignedIn()) return false;
-            var now = Date.now();
-            if (window.__parkingParkChirpAutofillAt
-                && (now - window.__parkingParkChirpAutofillAt) < 7000) return false;
             var fields = parkChirpFindLoginFields();
             if (!fields || !fields.password) return false;
-            // User is typing / focused in password — don't steal focus or reset the form.
-            var passVal = String(fields.password.value || '');
-            if (document.activeElement === fields.password || document.activeElement === fields.email) {
-              return false;
-            }
-            if (passVal.length > 0 && passVal.length < 8) return false;
-            if (parkChirpPasswordReady(fields.password)) return false;
-
             parkChirpPrepareLoginAutocomplete(fields);
-            if (!window.__parkingParkChirpLoginWaitAt) window.__parkingParkChirpLoginWaitAt = now;
-            var waited = now - window.__parkingParkChirpLoginWaitAt;
-            // Give Keychain ~10s with an empty/unforced email before injecting BookingConfig email.
-            if (waited >= 10000) {
-              fillParkChirpLoginEmail();
-            }
-
-            try {
-              var emailEmpty = !fields.email || !String(fields.email.value || '').trim();
-              var target = (emailEmpty && fields.email) ? fields.email : fields.password;
-              ensureInView(target);
-              try { target.focus(); } catch (e) {}
-              window.__parkingParkChirpAutofillAt = now;
-              bridge({
-                type: 'log',
-                message: 'parkChirp autofillHint focus=' + (target === fields.email ? 'email' : 'password')
-                  + ' emailFilled=' + (!emailEmpty)
-                  + ' waitedMs=' + waited
-              });
-              return true;
-            } catch (e) {
-              return false;
-            }
+            if (window.__parkingParkChirpKeychainPrompted) return false;
+            window.__parkingParkChirpKeychainPrompted = true;
+            bridge({ type: 'parkChirpKeychain' });
+            bridge({
+              type: 'log',
+              message: 'parkChirp keychain: tap Email Address → Passwords/key (JS cannot fetch Keychain)'
+            });
+            return true;
           }
 
           function parkChirpLoginFieldsFilled() {

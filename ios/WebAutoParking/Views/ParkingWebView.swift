@@ -22,6 +22,11 @@ struct ParkingWebView: View {
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .alert("ParkChirp sign-in", isPresented: $model.showParkChirpKeychainHint) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Tap Email Address, then Passwords or the key icon on the keyboard to fill from Keychain. The app cannot pull passwords itself. Automation continues after you sign in.")
+        }
         .toolbar {
             // Keep controls in the nav bar (not a bottom toolbar).
             // Trailing only so a pushed garage screen still has room for the system Back.
@@ -68,6 +73,7 @@ final class WebViewModel: ObservableObject {
     @Published var canGoBack = false
     @Published var canGoForward = false
     @Published var currentURL: URL?
+    @Published var showParkChirpKeychainHint = false
 
     weak var webView: WKWebView?
 
@@ -245,6 +251,9 @@ struct WebViewRepresentable: UIViewRepresentable {
                 if type == "log" {
                     let text = body["message"] as? String ?? "\(body)"
                     AppLog.log("Prefill bridge \(text)")
+                } else if type == "parkChirpKeychain" {
+                    AppLog.log("Prefill bridge parkChirpKeychain prompt")
+                    self.model.showParkChirpKeychainHint = true
                 } else if type == "xhr" {
                     let method = body["method"] as? String ?? "?"
                     let url = body["url"] as? String ?? "?"
