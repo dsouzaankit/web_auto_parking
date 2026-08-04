@@ -2011,6 +2011,47 @@ enum BookingFormPrefill {
             return null;
           }
 
+          /// Hint iOS WKWebView numeric keypad on Zone # (don't change type — React often owns it).
+          function nudgeZoneIdNumericKeypad(el) {
+            el = el || findZoneNumberInput();
+            if (!el) return false;
+            try {
+              var changed = false;
+              if (el.getAttribute('inputmode') !== 'numeric') {
+                el.setAttribute('inputmode', 'numeric');
+                changed = true;
+              }
+              // Classic iOS Safari hint for a digits pad on type=text.
+              if (el.getAttribute('pattern') !== '[0-9]*') {
+                el.setAttribute('pattern', '[0-9]*');
+                changed = true;
+              }
+              if (el.getAttribute('enterkeyhint') !== 'done') {
+                el.setAttribute('enterkeyhint', 'done');
+                changed = true;
+              }
+              if (changed && !window.__parkingZoneKeypadNudged) {
+                window.__parkingZoneKeypadNudged = true;
+                bridge({ type: 'log', message: 'zoneId keypad nudge inputmode=numeric pattern=[0-9]*' });
+              }
+              return changed;
+            } catch (e) {
+              return false;
+            }
+          }
+
+          /// Prefill returns filled on zone-id and stops; keep attrs alive across React re-renders.
+          function ensureZoneIdKeypadWatch() {
+            if (window.__parkingZoneKeypadWatch) return;
+            window.__parkingZoneKeypadWatch = setInterval(function() {
+              try {
+                if (!isParkMobileZoneFlow()) return;
+                if (!isZoneIdEntryPage()) return;
+                nudgeZoneIdNumericKeypad();
+              } catch (e) {}
+            }, 1200);
+          }
+
           /// Do not call /api/zones/search ourselves — live XHR shows our fetch gets HTTP 400/422.
           /// Rely on SPA Search Zones + Get user location (cached via installZoneFetchHook / DOM).
           function requestNearestZonesFromApi() {
@@ -2045,6 +2086,7 @@ enum BookingFormPrefill {
             if (candidate) {
               var input = findZoneNumberInput();
               var code = String(candidate.signageCode || candidate.zoneID || '').trim();
+              if (input) nudgeZoneIdNumericKeypad(input);
               if (input && code && setNativeValue(input, code)) {
                 window.__parkingNearestZoneFilled = true;
                 bridge({ type: 'log', message: 'filled Zone # ' + code });
@@ -2691,6 +2733,8 @@ enum BookingFormPrefill {
 
               // Zone-id page: prefill / deep-link nearest zone, but never auto-submit Confirm Zone.
               if (isZoneIdEntryPage()) {
+                ensureZoneIdKeypadWatch();
+                nudgeZoneIdNumericKeypad();
                 var nearestStatus = fillNearestZoneOnStartPage();
                 if (nearestStatus === 'navigated') {
                   return { status: 'advanced', filled: 0, action: 'pickZone' };
@@ -2701,6 +2745,7 @@ enum BookingFormPrefill {
                 if (nearestStatus === 'pending') {
                   return { status: 'waiting', filled: 0, action: 'awaitZonePrefill' };
                 }
+                nudgeZoneIdNumericKeypad();
                 if (!window.__parkingZoneIdManualLogged) {
                   window.__parkingZoneIdManualLogged = true;
                   bridge({
