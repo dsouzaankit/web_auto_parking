@@ -72,7 +72,7 @@ struct Garage: Identifiable, Codable, Equatable, Hashable {
     }
 
     /// Opens checkout using the selected start mode (ASAP / last 15 / last 30) and duration.
-    /// Fixed-duration providers lock end to the global 3–6h setting; flexible ones leave duration to the rate package.
+    /// Fixed-duration providers lock end to the global 1–6h setting; flexible ones leave duration to the rate package.
     func reservationURL(
         from date: Date = .now,
         calendar: Calendar = .current,

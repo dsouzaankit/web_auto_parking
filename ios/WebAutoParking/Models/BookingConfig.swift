@@ -9,12 +9,12 @@ struct BookingConfig: Codable, Equatable {
     var preferGuestCheckout: Bool
     /// Preferred payment: `applePay` (default), `card`, or `paypal`.
     var paymentMethod: String
-    /// Fixed-duration locked window length (3–6). Overridable in-app.
+    /// Fixed-duration locked window length (1–6). Overridable in-app.
     var sessionDurationHours: Int
     var vehicle: VehicleDetails
 
-    /// Allowed fixed-duration session lengths.
-    static let allowedDurations = [3, 4, 5, 6]
+    /// Allowed fixed-duration session lengths (Garages tab: 3–6h row, then 1–2h).
+    static let allowedDurations = [1, 2, 3, 4, 5, 6]
 
     struct VehicleDetails: Codable, Equatable {
         var makeAndModel: String
@@ -78,7 +78,7 @@ struct BookingConfig: Codable, Equatable {
         return key.isEmpty || key == "applepay" || key == "apple_pay" || key == "apple-pay"
     }
 
-    /// Normalized to 3–6 hours (default 4).
+    /// Normalized to 1–6 hours (default 4).
     var normalizedSessionDurationHours: Int {
         Self.clampDuration(sessionDurationHours)
     }

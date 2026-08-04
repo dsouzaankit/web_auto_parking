@@ -28,7 +28,7 @@ enum ReservationStartMode: String, CaseIterable, Identifiable {
     }
 }
 
-/// Global fixed-duration session length (3–6h) and reservation start mode.
+/// Global fixed-duration session length (1–6h) and reservation start mode.
 /// In-app choices override `BookingConfig.json` defaults where applicable.
 @MainActor
 final class SessionPreferences: ObservableObject {

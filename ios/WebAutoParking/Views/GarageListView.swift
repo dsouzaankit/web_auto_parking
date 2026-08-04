@@ -26,13 +26,22 @@ struct GarageListView: View {
                 }
                 .pickerStyle(.segmented)
 
-                Picker("Fixed duration", selection: $sessionPrefs.durationHours) {
-                    Text("3h").tag(3)
-                    Text("4h").tag(4)
-                    Text("5h").tag(5)
-                    Text("6h").tag(6)
+                VStack(spacing: 8) {
+                    Picker("Fixed duration", selection: $sessionPrefs.durationHours) {
+                        Text("3h").tag(3)
+                        Text("4h").tag(4)
+                        Text("5h").tag(5)
+                        Text("6h").tag(6)
+                    }
+                    .pickerStyle(.segmented)
+
+                    Picker("Short duration", selection: $sessionPrefs.durationHours) {
+                        Text("1h").tag(1)
+                        Text("2h").tag(2)
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityLabel("Short fixed duration")
                 }
-                .pickerStyle(.segmented)
 
                 Text(sessionSummary)
                     .font(.subheadline.monospacedDigit())
@@ -40,7 +49,7 @@ struct GarageListView: View {
             } header: {
                 Text("Session")
             } footer: {
-                Text("ASAP = next 15‑min mark; −15m/−30m = last mark at or before now. Fixed length locked for fixed-duration lots; flexible keeps free extra time.")
+                Text("ASAP = next 15‑min mark; −15m/−30m = last mark at or before now. Fixed length 1–6h for fixed-duration lots; flexible keeps free extra time.")
             }
 
             Section {
