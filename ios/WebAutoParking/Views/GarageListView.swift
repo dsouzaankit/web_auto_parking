@@ -46,7 +46,7 @@ struct GarageListView: View {
             Section {
                 ForEach(store.garages) { garage in
                     Button {
-                        // Lincoln Harbor / 1525 Harbor → 6h on each tap, unless user just picked a duration.
+                        // 1525 Harbor → 6h on each tap, unless user just picked a duration.
                         if let preferred = garage.preferredDurationHours, !durationChosenViaPicker {
                             if sessionPrefs.durationHours != preferred {
                                 ignoreNextDurationChange = true

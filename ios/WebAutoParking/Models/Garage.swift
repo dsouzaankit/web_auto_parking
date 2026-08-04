@@ -64,8 +64,8 @@ struct Garage: Identifiable, Codable, Equatable, Hashable {
     /// When set, opening this garage uses this fixed duration instead of the session picker.
     var preferredDurationHours: Int? {
         switch (provider, facilityID) {
-        case (.fixedDuration, "12551"), (.fixedDuration, "62713"):
-            return 6 // Lincoln Harbor + 1525 Harbor
+        case (.fixedDuration, "62713"):
+            return 6 // 1525 Harbor
         default:
             return nil
         }
@@ -116,14 +116,6 @@ struct Garage: Identifiable, Codable, Equatable, Hashable {
         name: "(SP+) - The Bisby Garage",
         address: "30 Park Ln. N., Jersey City, NJ 07310",
         notes: "Park in any non-Reserved spot. Pass validated by license plate — no attendant needed."
-    )
-
-    static let lincolnHarborWeehawken = Garage(
-        facilityID: "12551",
-        provider: .fixedDuration,
-        name: "Lincoln Harbor Garage",
-        address: "1385 Waterfront Ter., Weehawken, NJ 07086",
-        notes: "Pull ticket at gate; park in any non-Reserved spot. At exit, press Help and read parking pass # to attendant."
     )
 
     static let harborWeehawken = Garage(

@@ -44,9 +44,6 @@ struct AddGarageView: View {
                 Button("The Bisby Garage") {
                     apply(Garage.bisbyJerseyCity)
                 }
-                Button("Lincoln Harbor Garage") {
-                    apply(Garage.lincolnHarborWeehawken)
-                }
                 Button("1525 Harbor Garage") {
                     apply(Garage.harborWeehawken)
                 }

@@ -67,6 +67,8 @@ final class GarageStore: ObservableObject {
 
     private func ensureDefaults(in existing: [Garage]) -> [Garage] {
         var result = existing
+        // Drop retired presets (e.g. Lincoln Harbor) from persisted lists.
+        result.removeAll { Self.isRetiredPreset($0) }
         for preset in Self.defaultGarages {
             let has = result.contains {
                 $0.facilityID == preset.facilityID && $0.provider == preset.provider
@@ -77,6 +79,10 @@ final class GarageStore: ObservableObject {
         }
         // Keep default order from `defaultGarages` (ParkChirp Harbor last).
         return Self.orderedWithDefaultsFirst(result)
+    }
+
+    private static func isRetiredPreset(_ garage: Garage) -> Bool {
+        garage.provider == .fixedDuration && garage.facilityID == "12551" // Lincoln Harbor Garage
     }
 
     /// Stable list: presets in `defaultGarages` order, then any custom garages.
@@ -96,7 +102,6 @@ final class GarageStore: ObservableObject {
 
     private static let defaultGarages: [Garage] = [
         .bisbyJerseyCity,
-        .lincolnHarborWeehawken,
         .harborWeehawken,
         .mallDriveJerseyCity,
         .harborParkChirp

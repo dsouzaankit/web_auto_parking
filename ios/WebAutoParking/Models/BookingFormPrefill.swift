@@ -433,9 +433,19 @@ enum BookingFormPrefill {
           }
 
           function vehiclePlateInput() {
-            return firstVisible(
-              '#vrn, input[name=\"vrn\"], #licensePlate, #license-plate, #plate, input[name*=\"plate\" i], input[id*=\"plate\" i], input[name*=\"license\" i], input[name*=\"lpn\" i], [data-testid=\"Vehicle-input-plate\"], [data-pmtest-id*=\"vehicle\"][data-pmtest-id*=\"plate\"], [data-pmtest-id*=\"license\"], input[autocomplete=\"off\"][maxlength]'
+            var el = firstVisible(
+              '#vrn, input[name=\"vrn\"], #licensePlate, #license-plate, #plate, input[name*=\"plate\" i], input[id*=\"plate\" i], input[name*=\"license\" i], input[name*=\"lpn\" i], [data-testid=\"Vehicle-input-plate\"], [data-pmtest-id*=\"vehicle\"][data-pmtest-id*=\"plate\"], [data-pmtest-id*=\"license\"]'
             );
+            if (el) return el;
+            // Last resort: maxlength input near a plate/vehicle label (avoid random autocomplete=off fields).
+            var inputs = document.querySelectorAll('input[autocomplete=\"off\"][maxlength], input[type=\"text\"][maxlength]');
+            for (var i = 0; i < inputs.length; i++) {
+              var cand = inputs[i];
+              if (!visible(cand)) continue;
+              var meta = labelText(cand) + ' ' + norm((cand.closest('form,section,div') || {}).innerText || '').slice(0, 120);
+              if (/licenseplate|platenumber|vehicleplate|\\bvrn\\b|\\bplate\\b/.test(meta)) return cand;
+            }
+            return null;
           }
 
           function vehiclePlateMatches() {
@@ -445,6 +455,39 @@ enum BookingFormPrefill {
             if (!cur) return false;
             if (cfg.licensePlateNumber && norm(cur) !== norm(cfg.licensePlateNumber)) return false;
             return true;
+          }
+
+          /// Accordion checkout: prefer the Vehicle Details card that owns the plate field.
+          function vehicleStepRoot() {
+            var plate = vehiclePlateInput();
+            if (plate) {
+              var node = plate;
+              for (var up = 0; up < 8 && node; up++) {
+                var tid = ((node.getAttribute && (node.getAttribute('data-pmtest-id') || node.getAttribute('data-testid'))) || '').toLowerCase();
+                if (/vehicle/.test(tid) && (/step|card|form|section|info/.test(tid) || node.querySelector('button, [role=\"button\"]'))) {
+                  return node;
+                }
+                node = node.parentElement;
+              }
+              var form = plate.closest('form');
+              if (form) return form;
+              var section = plate.closest('section, [class*=\"vehicle\" i], [id*=\"vehicle\" i]');
+              if (section) return section;
+            }
+            var cards = document.querySelectorAll(
+              '[data-pmtest-id*=\"vehicle\" i], [data-testid*=\"Vehicle\"], [data-testid*=\"vehicle\"]'
+            );
+            for (var c = 0; c < cards.length; c++) {
+              if (visible(cards[c])) return cards[c];
+            }
+            return null;
+          }
+
+          function isGarageCheckoutVehicleStep() {
+            if (!/\\/checkout\\/reservation/i.test(location.pathname || '')) return false;
+            if (vehiclePlateInput()) return true;
+            var body = norm(document.body ? document.body.innerText : '');
+            return /vehicledetails|addvehicle|licenseplate/.test(body);
           }
 
           /// Force plate + country + state from BookingConfig (overwrite wrong defaults like AL / partial plate).
@@ -560,53 +603,85 @@ enum BookingFormPrefill {
               'input[type=\"submit\"]',
               'button, a, [role=\"button\"], input[type=\"button\"]'
             ];
-            var seen = [];
+            var root = vehicleStepRoot();
+            var scopes = root ? [root, document] : [document];
+            // Prefer Save & Continue (garage Vehicle Details) over bare Continue.
+            var saveBtn = null;
+            var continueBtn = null;
             var fallback = null;
-            for (var s = 0; s < selectors.length; s++) {
-              var nodes = [];
-              try { nodes = document.querySelectorAll(selectors[s]); } catch (e) { continue; }
-              for (var i = 0; i < nodes.length; i++) {
-                var b = nodes[i];
-                if (!b || seen.indexOf(b) !== -1 || !visible(b)) continue;
-                seen.push(b);
-                var tid = ((b.getAttribute('data-pmtest-id') || '') + ' ' + (b.getAttribute('data-testid') || '')).toLowerCase();
-                var t = ((b.innerText || b.textContent || '') + ' ' + (b.getAttribute('aria-label') || '')
-                  + ' ' + (b.value || '') + ' ' + tid).toLowerCase().replace(/\\s+/g, ' ').trim();
-                var key = norm(t);
-                if (!key && (b.type || '').toLowerCase() !== 'submit') continue;
-                if (/continue with apple|apple pay|complete purchase|buy with|log in|sign up|sign in|guest/.test(t)) continue;
-                if (/payment/.test(tid) && tid.indexOf('vehicle') === -1) continue;
-                if (tid.indexOf('continue') !== -1 || tid.indexOf('vehiclesubmit') !== -1
-                    || (tid.indexOf('vehicle') !== -1 && tid.indexOf('confirm') !== -1)) {
-                  return b;
-                }
-                if (key === 'saveandcontinue' || key === 'savecontinue' || key === 'continue'
-                    || key === 'next' || key === 'save' || key === 'addvehicle' || key === 'confirm') {
-                  return b;
-                }
-                // \"Continue\" with trailing icon/accessibility junk still starts with continue.
-                if (key.indexOf('continue') === 0 && key.length < 32) return b;
-                if ((b.type || '').toLowerCase() === 'submit') {
-                  fallback = fallback || b;
+            for (var scopeIdx = 0; scopeIdx < scopes.length; scopeIdx++) {
+              var scope = scopes[scopeIdx];
+              var seen = [];
+              for (var s = 0; s < selectors.length; s++) {
+                var nodes = [];
+                try { nodes = scope.querySelectorAll(selectors[s]); } catch (e) { continue; }
+                for (var i = 0; i < nodes.length; i++) {
+                  var b = nodes[i];
+                  if (!b || seen.indexOf(b) !== -1 || !visible(b)) continue;
+                  seen.push(b);
+                  var tid = ((b.getAttribute('data-pmtest-id') || '') + ' ' + (b.getAttribute('data-testid') || '')).toLowerCase();
+                  var t = ((b.innerText || b.textContent || '') + ' ' + (b.getAttribute('aria-label') || '')
+                    + ' ' + (b.value || '') + ' ' + tid).toLowerCase().replace(/\\s+/g, ' ').trim();
+                  var key = norm(t);
+                  if (!key && (b.type || '').toLowerCase() !== 'submit') continue;
+                  if (/continue with apple|apple pay|complete purchase|buy with|log in|sign up|sign in|guest/.test(t)) continue;
+                  if (/payment|contact|email/.test(tid) && tid.indexOf('vehicle') === -1) continue;
+                  // Contact Continue above the vehicle accordion — skip when we have a vehicle root.
+                  if (root && scope === document) {
+                    var inVehicle = root.contains(b);
+                    if (!inVehicle && (key === 'continue' || key.indexOf('continue') === 0)
+                        && key.indexOf('save') === -1) continue;
+                  }
+                  if (key === 'saveandcontinue' || key === 'savecontinue'
+                      || (tid.indexOf('save') !== -1 && tid.indexOf('continue') !== -1)) {
+                    if (!saveBtn) saveBtn = b;
+                    continue;
+                  }
+                  if (tid.indexOf('vehiclesubmit') !== -1
+                      || (tid.indexOf('vehicle') !== -1 && tid.indexOf('confirm') !== -1)) {
+                    if (!continueBtn) continueBtn = b;
+                    continue;
+                  }
+                  if (key === 'continue' || key === 'next' || key === 'confirm'
+                      || (key.indexOf('continue') === 0 && key.length < 32)
+                      || tid.indexOf('continue') !== -1) {
+                    if (!continueBtn) continueBtn = b;
+                    continue;
+                  }
+                  if (key === 'save' || key === 'addvehicle') {
+                    if (!continueBtn) continueBtn = b;
+                    continue;
+                  }
+                  if ((b.type || '').toLowerCase() === 'submit') {
+                    fallback = fallback || b;
+                  }
                 }
               }
+              if (saveBtn) return saveBtn;
+              if (continueBtn) return continueBtn;
+              if (fallback) return fallback;
             }
-            return fallback;
+            return saveBtn || continueBtn || fallback;
           }
 
           function logVehicleFormDiagnostics() {
-            if (window.__parkingVehicleDiagLogged) return;
-            window.__parkingVehicleDiagLogged = true;
+            var now = Date.now();
+            if (window.__parkingVehicleDiagAt && (now - window.__parkingVehicleDiagAt) < 8000) return;
+            window.__parkingVehicleDiagAt = now;
             var plate = vehiclePlateInput();
             var country = firstVisible('select#country, select[name=\"country\"], select[name*=\"country\" i]');
             var state = firstVisible('select#state, select[name=\"state\"], select[name*=\"state\" i]');
             var btn = findParkMobileVehicleContinueButton() || findZoneContinueButton();
+            var root = vehicleStepRoot();
             bridge({
               type: 'log',
               message: 'vehicleDiag plate=' + (plate ? String(plate.value || '').trim() : 'missing')
                 + ' countrySel=' + (country ? (country.value || '') : 'none')
                 + ' stateSel=' + (state ? (state.value || '') : 'none')
+                + ' countryCombo=' + comboboxDisplayMatches(/country|nation/i, cfg.country)
+                + ' stateCombo=' + comboboxDisplayMatches(/state|province/i, cfg.state)
                 + ' ready=' + (!!vehicleFormReady())
+                + ' root=' + (root ? (((root.getAttribute('data-pmtest-id') || root.getAttribute('data-testid') || root.tagName) || '').slice(0, 40)) : 'none')
                 + ' btn=' + (btn ? ((btn.innerText || '').trim().slice(0, 24) + (btn.disabled ? ':disabled' : '')) : 'missing')
             });
           }
@@ -648,12 +723,27 @@ enum BookingFormPrefill {
             if (cfg.licensePlateNumber && norm(String(plate.value || '')) !== norm(cfg.licensePlateNumber)) return null;
             var country = firstVisible('select#country, select[name=\"country\"], select[name*=\"country\" i]');
             var state = firstVisible('select#state, select[name=\"state\"], select[name*=\"state\" i], select[name*=\"province\" i]');
+            var hasCountryCombo = hasLabeledCombobox(/country|nation/i);
+            var hasStateCombo = hasLabeledCombobox(/state|province/i);
             if (cfg.country && country && visible(country) && !selectMatchesValue(country, cfg.country)) return null;
             if (cfg.state && state && visible(state) && !selectMatchesValue(state, cfg.state)) return null;
-            if (cfg.country && !country && hasLabeledCombobox(/country|nation/i)
+            if (cfg.country && !country && hasCountryCombo
                 && !comboboxDisplayMatches(/country|nation/i, cfg.country)) return null;
-            if (cfg.state && !state && hasLabeledCombobox(/state|province/i)
+            if (cfg.state && !state && hasStateCombo
                 && !comboboxDisplayMatches(/state|province/i, cfg.state)) return null;
+            // Garage accordion often mounts plate first; wait for country/state controls before Continue.
+            if (isGarageCheckoutVehicleStep() && cfg.state && !state && !hasStateCombo) {
+              if (!window.__parkingVehicleStateWaitAt) window.__parkingVehicleStateWaitAt = Date.now();
+              if ((Date.now() - window.__parkingVehicleStateWaitAt) < 5000) return null;
+            } else {
+              window.__parkingVehicleStateWaitAt = 0;
+            }
+            if (isGarageCheckoutVehicleStep() && cfg.country && !country && !hasCountryCombo) {
+              if (!window.__parkingVehicleCountryWaitAt) window.__parkingVehicleCountryWaitAt = Date.now();
+              if ((Date.now() - window.__parkingVehicleCountryWaitAt) < 5000) return null;
+            } else {
+              window.__parkingVehicleCountryWaitAt = 0;
+            }
             return { plate: plate, country: country, state: state };
           }
 
@@ -691,16 +781,44 @@ enum BookingFormPrefill {
               }
               return false;
             }
+            var btnLabel = ((btn.innerText || btn.textContent || '') + '').trim().replace(/\\s+/g, ' ').slice(0, 32);
             var ariaDisabled = btn.getAttribute('aria-disabled') === 'true';
             if (btn.disabled || ariaDisabled) {
               // React often keeps Continue disabled until a real input cycle; nudge then force.
               nudgeVehicleFormValidation(form.plate);
               if (!forceClickDisabled(btn)) return false;
+              bridge({ type: 'log', message: 'vehicle Continue forced (disabled) btn=' + btnLabel });
             } else if (!click(btn, { scroll: false })) {
               return false;
+            } else {
+              bridge({ type: 'log', message: 'vehicle Continue tapped btn=' + btnLabel });
             }
             window.__parkingLastSaveAt = now;
-            bridge({ type: 'log', message: 'vehicle Continue tapped' });
+            return true;
+          }
+
+          /// Garage checkout: after fields look ready (or state controls never appear), force Continue.
+          function clickGarageVehicleContinueAggressive() {
+            if (!isGarageCheckoutVehicleStep()) return false;
+            var now = Date.now();
+            if (window.__parkingLastSaveAt && (now - window.__parkingLastSaveAt) < 2200) return false;
+            if (!vehiclePlateMatches()) return false;
+            var ready = vehicleFormReady();
+            if (!ready) {
+              // Only escalate once we've waited long enough for country/state to mount.
+              var waitedState = window.__parkingVehicleStateWaitAt
+                && (now - window.__parkingVehicleStateWaitAt) >= 5000;
+              var waitedCountry = window.__parkingVehicleCountryWaitAt
+                && (now - window.__parkingVehicleCountryWaitAt) >= 5000;
+              if (!waitedState && !waitedCountry) return false;
+            }
+            var plate = vehiclePlateInput();
+            nudgeVehicleFormValidation(plate);
+            var btn = findParkMobileVehicleContinueButton();
+            if (!btn) return false;
+            if (!forceClickDisabled(btn)) return false;
+            window.__parkingLastSaveAt = now;
+            bridge({ type: 'log', message: 'vehicle Continue forced (garage)' });
             return true;
           }
 
@@ -975,34 +1093,53 @@ enum BookingFormPrefill {
           function clickSaveAndContinue() {
             var now = Date.now();
             if (window.__parkingLastSaveAt && (now - window.__parkingLastSaveAt) < 2500) return false;
-            var btn = findByText(
-              'button, a, [role=\"button\"], input[type=\"button\"], input[type=\"submit\"]',
-              /saveandcontinue|savecontinue/
-            );
-            if (!btn || btn.disabled) return false;
+            // Prefer vehicle-scoped Save & Continue when the plate form is up.
+            var btn = null;
+            if (vehiclePlateInput()) {
+              btn = findParkMobileVehicleContinueButton();
+              var btnKey = btn ? norm((btn.innerText || btn.textContent || '') + ' ' + (btn.getAttribute('aria-label') || '')) : '';
+              if (btn && btnKey.indexOf('save') === -1) btn = null;
+            }
+            if (!btn) {
+              btn = findByText(
+                'button, a, [role=\"button\"], input[type=\"button\"], input[type=\"submit\"]',
+                /saveandcontinue|savecontinue/
+              );
+            }
+            if (!btn || !visible(btn)) return false;
 
             var email = firstVisible(emailInputSelector());
             var phone = firstVisible(phoneInputSelector());
-            var plate = firstVisible('#vrn, input[name=\"vrn\"]');
+            var plate = vehiclePlateInput() || firstVisible('#vrn, input[name=\"vrn\"]');
             var country = firstVisible('select#country, select[name=\"country\"]');
             var state = firstVisible('select#state, select[name=\"state\"]');
 
             var onContact = !!((email && visible(email)) || (phone && visible(phone)));
             var onVehicle = !!(plate && visible(plate));
 
-            if (onContact) {
+            if (onContact && !onVehicle) {
               if (cfg.email && email && visible(email) && norm(String(email.value || '')) !== norm(cfg.email)) return false;
               if (email && visible(email) && !String(email.value || '').trim()) return false;
               if (phone && visible(phone) && !String(phone.value || '').trim()) return false;
             }
             if (onVehicle) {
+              if (cfg.licensePlateNumber && !vehiclePlateMatches()) return false;
               if (!String(plate.value || '').trim()) return false;
-              if (country && visible(country) && (!String(country.value || '').trim() || country.selectedIndex <= 0)) return false;
-              if (state && visible(state) && (!String(state.value || '').trim() || state.selectedIndex <= 0)) return false;
+              if (cfg.country && country && visible(country) && !selectMatchesValue(country, cfg.country)) return false;
+              if (cfg.state && state && visible(state) && !selectMatchesValue(state, cfg.state)) return false;
             }
             // Don't click Save on unrelated screens.
             if (!onContact && !onVehicle) return false;
-            if (!click(btn, { scroll: false })) return false;
+            var ariaDisabled = btn.getAttribute('aria-disabled') === 'true';
+            if (btn.disabled || ariaDisabled) {
+              if (onVehicle) nudgeVehicleFormValidation(plate);
+              if (!forceClickDisabled(btn)) return false;
+              bridge({ type: 'log', message: 'Save & Continue forced' });
+            } else if (!click(btn, { scroll: false })) {
+              return false;
+            } else {
+              bridge({ type: 'log', message: 'Save & Continue tapped' });
+            }
             window.__parkingLastSaveAt = now;
             return true;
           }
@@ -2539,13 +2676,30 @@ enum BookingFormPrefill {
               if (clickParkMobileAddVehicle()) action = action || 'vehicleAdd';
               filled += fillSpotHeroVehicleModal();
               filled += fillContactFields();
-              filled += fillParkMobileVehicleFields();
+              var forceGarageVehicle = isGarageCheckoutVehicleStep() && (
+                !window.__parkingGarageVehicleForced
+                || ((window.__parkingGarageVehicleForceAt || 0) + 4000 < Date.now())
+              );
+              if (forceGarageVehicle) {
+                window.__parkingGarageVehicleForced = true;
+                window.__parkingGarageVehicleForceAt = Date.now();
+              }
+              filled += fillParkMobileVehicleFields({ force: !!forceGarageVehicle });
+              if (isGarageCheckoutVehicleStep() || vehiclePlateInput()) {
+                logVehicleFormDiagnostics();
+              }
               if (clickSpotHeroVehicleConfirm()) action = action || 'vehicleConfirm';
-              if (clickParkMobileVehicleContinue()) action = action || 'vehicleConfirm';
-              // SpotHero contact Continue + ParkMobile Save & Continue.
-              if (clickSpotHeroContactContinue()) action = action || 'spotHeroContinue';
-              if (clickParkMobileContactContinue()) action = action || 'contactContinue';
-              if (clickSaveAndContinue()) action = action || 'saveContinue';
+              // Garage Vehicle Details uses Save & Continue — tap that before bare Continue.
+              if (clickSaveAndContinue()
+                  || clickParkMobileVehicleContinue()
+                  || clickGarageVehicleContinueAggressive()) {
+                action = action || 'vehicleConfirm';
+              }
+              // Don't re-tap Contact Continue once the vehicle form is the active step.
+              if (!(isGarageCheckoutVehicleStep() && (vehiclePlateMatches() || vehicleFormReady()))) {
+                if (clickSpotHeroContactContinue()) action = action || 'spotHeroContinue';
+                if (clickParkMobileContactContinue()) action = action || 'contactContinue';
+              }
               // ParkMobile Payment Details → Continue with Apple Pay; Confirm → I acknowledge.
               // Never taps Complete Purchase / Buy with Apple Pay.
               if (clickContinueWithApplePay()) action = action || 'applePay';
