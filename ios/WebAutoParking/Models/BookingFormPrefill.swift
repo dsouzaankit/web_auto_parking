@@ -1913,6 +1913,9 @@ enum BookingFormPrefill {
             var opt = sel.options[idx];
             var value = opt.value;
             try {
+              for (var oi = 0; oi < sel.options.length; oi++) sel.options[oi].selected = (oi === idx);
+            } catch (e0) {}
+            try {
               var proto = HTMLSelectElement.prototype;
               var desc = Object.getOwnPropertyDescriptor(proto, 'value');
               if (desc && desc.set) desc.set.call(sel, value);
@@ -1922,9 +1925,22 @@ enum BookingFormPrefill {
             }
             try { sel.selectedIndex = idx; } catch (e2) {}
             try { opt.selected = true; } catch (e3) {}
+            try { sel.focus(); } catch (e4) {}
             sel.dispatchEvent(new Event('input', { bubbles: true }));
             sel.dispatchEvent(new Event('change', { bubbles: true }));
+            try {
+              sel.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertReplacementText' }));
+            } catch (e5) {}
             return norm(sel.value) === norm(value) || sel.selectedIndex === idx;
+          }
+
+          function setSelectByNumber(sel, wantNumber) {
+            if (!sel || wantNumber == null) return false;
+            var opts = selectOptionNumbers(sel);
+            for (var i = 0; i < opts.length; i++) {
+              if (opts[i].n === wantNumber) return setSelectOptionIndex(sel, opts[i].idx);
+            }
+            return false;
           }
 
           function pickDurationCombobox(kindRe, wantNumber) {
@@ -1962,15 +1978,10 @@ enum BookingFormPrefill {
             return isNaN(n) ? null : n;
           }
 
-          function selectGreatestDurationUpToMax() {
-            // Allow a few retries — minute change often resets hour in React state.
-            var attempts = window.__parkingZoneDurationAttempts || 0;
-            if (attempts >= 4) return false;
-            var maxMin = cfg.maxDurationMinutes || 100;
+          function findZoneHourMinuteSelects() {
             var selects = [];
             var all = document.querySelectorAll('select');
             for (var i = 0; i < all.length; i++) if (visible(all[i])) selects.push(all[i]);
-
             var hourSelect = null;
             var minuteSelect = null;
             var combinedSelect = null;
@@ -1984,16 +1995,14 @@ enum BookingFormPrefill {
               if (/hour|hr\\b/.test(meta)) hourSelect = hourSelect || s;
               if (/minute|\\bmin\\b/.test(meta)) minuteSelect = minuteSelect || s;
             }
-
-            // Classify unlabeled selects by option shape (hours 0-12 vs minutes 0/20/40…).
             if (!hourSelect || !minuteSelect) {
               for (var ci = 0; ci < selects.length; ci++) {
                 var cand = selects[ci];
+                if (cand === hourSelect || cand === minuteSelect) continue;
                 if (!hourSelect && looksLikeHourSelect(cand) && !looksLikeMinuteSelect(cand)) hourSelect = cand;
                 else if (!minuteSelect && looksLikeMinuteSelect(cand)) minuteSelect = cand;
               }
             }
-            // Last resort DOM order only if still missing and shapes agree.
             if ((!hourSelect || !minuteSelect) && selects.length >= 2
                 && /duration|hour|minute|how long/i.test(document.body.innerText || '')) {
               if (looksLikeHourSelect(selects[0]) && looksLikeMinuteSelect(selects[1])) {
@@ -2004,6 +2013,58 @@ enum BookingFormPrefill {
                 hourSelect = hourSelect || selects[1];
               }
             }
+            return { hourSelect: hourSelect, minuteSelect: minuteSelect, combinedSelect: combinedSelect, selects: selects };
+          }
+
+          function pickBestHourMinute(hourSelect, minuteSelect, maxMin) {
+            var maxH = Math.floor(maxMin / 60);
+            var hourOpts = selectOptionNumbers(hourSelect).filter(function(v) { return v.n >= 0 && v.n <= maxH; });
+            hourOpts.sort(function(a, b) { return b.n - a.n; });
+            // Preferred minutes include current options; also try common ParkMobile snaps after hour change.
+            var preferredMins = [40, 30, 20, 45, 15, 50, 10, 0];
+            for (var k = 0; k < hourOpts.length; k++) {
+              var candH = hourOpts[k];
+              var remain = maxMin - candH.n * 60;
+              var minuteOpts = selectOptionNumbers(minuteSelect);
+              var localBestM = -1;
+              var localBestIdx = -1;
+              for (var mi = 0; mi < minuteOpts.length; mi++) {
+                var mVal = minuteOpts[mi].n;
+                if (mVal <= remain && mVal > localBestM) {
+                  localBestM = mVal;
+                  localBestIdx = minuteOpts[mi].idx;
+                }
+              }
+              // If dependent minute list is still for hour=0, assume common snaps exist for higher hours.
+              if (localBestIdx < 0 && candH.n > 0) {
+                for (var p = 0; p < preferredMins.length; p++) {
+                  if (preferredMins[p] <= remain) {
+                    localBestM = preferredMins[p];
+                    localBestIdx = -2; // set by number after hour change
+                    break;
+                  }
+                }
+              }
+              if (localBestIdx !== -1) {
+                return { hour: candH.n, hourIdx: candH.idx, minute: localBestM, minuteIdx: localBestIdx };
+              }
+            }
+            return null;
+          }
+
+          function selectGreatestDurationUpToMax() {
+            // Retries needed — ParkMobile React resets hour when minutes change (and vice versa).
+            var attempts = window.__parkingZoneDurationAttempts || 0;
+            if (attempts >= 10) {
+              // Keep trying; never false-succeed with minutes-only and Continue at 0h.
+              window.__parkingZoneDurationAttempts = 0;
+              attempts = 0;
+            }
+            var maxMin = cfg.maxDurationMinutes || 100;
+            var found = findZoneHourMinuteSelects();
+            var hourSelect = found.hourSelect;
+            var minuteSelect = found.minuteSelect;
+            var combinedSelect = found.combinedSelect;
 
             if (combinedSelect && !hourSelect) {
               var bestIdx = -1;
@@ -2018,93 +2079,102 @@ enum BookingFormPrefill {
                   bestIdx = o;
                 }
               }
-              if (bestIdx >= 0) {
-                var combinedChanged = setSelectOptionIndex(combinedSelect, bestIdx);
-                if (combinedChanged) {
-                  window.__parkingZoneDurationSet = true;
-                  bridge({ type: 'log', message: 'setDuration combined=' + bestMins + 'm' });
-                  return true;
-                }
+              if (bestIdx >= 0 && setSelectOptionIndex(combinedSelect, bestIdx)) {
+                window.__parkingZoneDurationSet = true;
+                bridge({ type: 'log', message: 'setDuration combined=' + bestMins + 'm' });
+                return true;
               }
             }
 
             if (hourSelect && minuteSelect) {
-              var maxH = Math.floor(maxMin / 60);
-              var hourOpts = selectOptionNumbers(hourSelect).filter(function(v) { return v.n <= maxH; });
-              hourOpts.sort(function(a, b) { return b.n - a.n; });
-              var bestHIdx = -1;
-              var bestMIdx = -1;
-              var bestHVal = -1;
-              var bestMVal = -1;
-              for (var k = 0; k < hourOpts.length; k++) {
-                var candH = hourOpts[k];
-                var remain = maxMin - candH.n * 60;
-                var localBestM = -1;
-                var localBestIdx = -1;
-                var minuteOpts = selectOptionNumbers(minuteSelect);
-                for (var mi = 0; mi < minuteOpts.length; mi++) {
-                  var mVal = minuteOpts[mi].n;
-                  if (mVal <= remain && mVal > localBestM) {
-                    localBestM = mVal;
-                    localBestIdx = minuteOpts[mi].idx;
-                  }
-                }
-                if (localBestIdx >= 0) {
-                  bestHIdx = candH.idx;
-                  bestHVal = candH.n;
-                  bestMIdx = localBestIdx;
-                  bestMVal = localBestM;
-                  break;
-                }
-              }
-              if (bestHIdx >= 0 && bestMIdx >= 0) {
-                // Set minutes first, then hours — and re-apply hours (React often resets hour on minute change).
-                setSelectOptionIndex(minuteSelect, bestMIdx);
-                setSelectOptionIndex(hourSelect, bestHIdx);
-                setSelectOptionIndex(hourSelect, bestHIdx);
-                var gotH = readSelectedNumber(hourSelect);
-                var gotM = readSelectedNumber(minuteSelect);
+              var best = pickBestHourMinute(hourSelect, minuteSelect, maxMin);
+              if (!best) {
                 window.__parkingZoneDurationAttempts = attempts + 1;
-                var total = (gotH != null ? gotH : 0) * 60 + (gotM != null ? gotM : 0);
-                var target = bestHVal * 60 + bestMVal;
-                bridge({
-                  type: 'log',
-                  message: 'setDuration hour=' + gotH + ' min=' + gotM + ' target=' + target + 'm'
-                });
-                if (gotH === bestHVal && gotM === bestMVal) {
-                  window.__parkingZoneDurationSet = true;
-                  return true;
+                if (!window.__parkingDurationDiagLogged) {
+                  window.__parkingDurationDiagLogged = true;
+                  bridge({
+                    type: 'log',
+                    message: 'durationDiag no-best max=' + maxMin
+                      + ' hours=' + selectOptionNumbers(hourSelect).map(function(v) { return v.n; }).join(',')
+                      + ' mins=' + selectOptionNumbers(minuteSelect).map(function(v) { return v.n; }).join(',')
+                  });
                 }
-                // Also try combobox UI if native select did not stick.
-                if (gotH !== bestHVal) pickDurationCombobox(/hour|hr/, bestHVal);
-                if (gotM !== bestMVal) pickDurationCombobox(/minute|min/, bestMVal);
-                gotH = readSelectedNumber(hourSelect);
-                gotM = readSelectedNumber(minuteSelect);
-                if (gotH === bestHVal && gotM === bestMVal) {
-                  window.__parkingZoneDurationSet = true;
-                  return true;
-                }
-                // Partial progress (e.g. minutes only) — keep retrying next tick.
-                return gotM === bestMVal || gotH === bestHVal || total >= Math.min(maxMin, 40);
+                return false;
               }
+              // Hour FIRST so dependent minute lists refresh for that hour, then minutes, then re-assert hour.
+              setSelectByNumber(hourSelect, best.hour) || setSelectOptionIndex(hourSelect, best.hourIdx);
+              pickDurationCombobox(/hour|hr/, best.hour);
+              if (best.minuteIdx >= 0) setSelectOptionIndex(minuteSelect, best.minuteIdx);
+              else setSelectByNumber(minuteSelect, best.minute);
+              pickDurationCombobox(/minute|min/, best.minute);
+              setSelectByNumber(hourSelect, best.hour) || setSelectOptionIndex(hourSelect, best.hourIdx);
+              pickDurationCombobox(/hour|hr/, best.hour);
+              // Re-pick minutes after hour re-assert (options may have just refreshed).
+              setSelectByNumber(minuteSelect, best.minute);
+              if (best.minuteIdx >= 0) setSelectOptionIndex(minuteSelect, best.minuteIdx);
+
+              var gotH = readSelectedNumber(hourSelect);
+              var gotM = readSelectedNumber(minuteSelect);
+              window.__parkingZoneDurationAttempts = attempts + 1;
+              var target = best.hour * 60 + best.minute;
+              bridge({
+                type: 'log',
+                message: 'setDuration hour=' + gotH + ' min=' + gotM
+                  + ' target=' + target + 'm max=' + maxMin
+                  + ' attempt=' + window.__parkingZoneDurationAttempts
+              });
+              // Only success when hour sticks — minutes-only used to false-succeed then Continue.
+              if (gotH === best.hour && gotM === best.minute) {
+                window.__parkingZoneDurationSet = true;
+                return true;
+              }
+              if (gotH === best.hour && gotM != null && (gotH * 60 + gotM) <= maxMin && (gotH * 60 + gotM) >= Math.min(maxMin, 60)) {
+                // Hour correct and total still a solid pick (e.g. 1h20 if 1h40 option raced away).
+                window.__parkingZoneDurationSet = true;
+                return true;
+              }
+              return false;
             }
 
             // Custom hour/minute comboboxes only.
             var maxH2 = Math.floor(maxMin / 60);
             var wantM = maxMin - maxH2 * 60;
-            // Snap minutes to common 20-min blocks used by ParkMobile zones.
-            var minuteSnaps = [0, 20, 40, 15, 30, 45, 10, 50];
+            var minuteSnaps = [40, 30, 20, 45, 15, 50, 10, 0];
             var snapM = 0;
             for (var ms = 0; ms < minuteSnaps.length; ms++) {
-              if (minuteSnaps[ms] <= wantM && minuteSnaps[ms] >= snapM) snapM = minuteSnaps[ms];
+              if (minuteSnaps[ms] <= wantM) { snapM = minuteSnaps[ms]; break; }
             }
             var comboChanged = false;
             if (maxH2 > 0) comboChanged = pickDurationCombobox(/hour|hr/, maxH2) || comboChanged;
             comboChanged = pickDurationCombobox(/minute|min/, snapM) || comboChanged;
+            if (maxH2 > 0) comboChanged = pickDurationCombobox(/hour|hr/, maxH2) || comboChanged;
+            window.__parkingZoneDurationAttempts = attempts + 1;
             if (comboChanged) {
-              window.__parkingZoneDurationAttempts = attempts + 1;
               bridge({ type: 'log', message: 'setDuration combobox hour=' + maxH2 + ' min=' + snapM });
-              return true;
+              // Verify via combobox text before committing.
+              var hourOk = maxH2 <= 0 || comboboxDisplayMatches(/hour|hr/, String(maxH2));
+              var minOk = comboboxDisplayMatches(/minute|min/, String(snapM));
+              if (hourOk && minOk) {
+                window.__parkingZoneDurationSet = true;
+                return true;
+              }
+            }
+            return false;
+          }
+
+          function zoneDurationReadyForContinue() {
+            if (!hasZoneDurationSelectors()) return true;
+            if (window.__parkingZoneDurationSet) return true;
+            // Soft accept if UI already shows >= 1h when our cap allows it.
+            var found = findZoneHourMinuteSelects();
+            if (found.hourSelect && found.minuteSelect) {
+              var h = readSelectedNumber(found.hourSelect);
+              var m = readSelectedNumber(found.minuteSelect);
+              var maxMin = cfg.maxDurationMinutes || 100;
+              if (h != null && m != null) {
+                var total = h * 60 + m;
+                if (total > 0 && total <= maxMin && h >= Math.min(1, Math.floor(maxMin / 60))) return true;
+              }
             }
             return false;
           }
@@ -2379,9 +2449,19 @@ enum BookingFormPrefill {
                 if (selectGreatestDurationUpToMax()) {
                   return { status: 'advanced', filled: 0, action: 'setDuration' };
                 }
-                if ((window.__parkingZoneDurationAttempts || 0) < 4) {
+                if ((window.__parkingZoneDurationAttempts || 0) < 10) {
                   return { status: 'waiting', filled: 0, action: 'awaitDuration' };
                 }
+                bridge({ type: 'log', message: 'duration give up after retries — blocking Continue until hour sticks' });
+                return { status: 'waiting', filled: 0, action: 'awaitDuration' };
+              }
+
+              // Never Continue while hour/minute pickers exist but duration is still wrong (e.g. 0h40m).
+              if (hasZoneDurationSelectors() && !zoneDurationReadyForContinue()) {
+                window.__parkingZoneDurationSet = false;
+                window.__parkingZoneDurationAttempts = Math.min(window.__parkingZoneDurationAttempts || 0, 8);
+                selectGreatestDurationUpToMax();
+                return { status: 'waiting', filled: 0, action: 'awaitDuration' };
               }
 
               if (clickZoneContinueButton()) {
