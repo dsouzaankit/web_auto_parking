@@ -92,6 +92,7 @@ Presets above are saved by default in that order (existing installs pick up miss
 - Allow **Location** when prompted so ParkMobile can prefill the nearest zone.
 - Loops **Continue** / **Confirm Zone** until `https://app.parkmobile.io/zone/auth?checkoutState=…`.
 - On submit errors, waits for **manual re-submit**, then resumes the Continue loop.
+- Duration (greedy, cap **2h**): pick the largest `#hours` with `h×60 ≤ 120` (values may be minute-encoded, e.g. `value="60"` = **1 Hour**), set it, then pick the largest live `#minutes` with total ≤ 120. Don’t score minutes before the hour is fixed — that list can refresh (20m steps plus an odd leftover for the zone max).
 - If hour/minute selectors are missing, keeps tapping **Continue**.
 - Capture notes / expected APIs: [`ai/parkmobile_zone_xhr/README.md`](ai/parkmobile_zone_xhr/README.md).
 

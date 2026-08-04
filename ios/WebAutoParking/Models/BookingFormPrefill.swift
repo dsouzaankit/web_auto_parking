@@ -2096,18 +2096,56 @@ enum BookingFormPrefill {
             return vals;
           }
 
+          /// ParkMobile Hours select: option value is often minutes (\"60\" = 1 Hour), text is \"1 Hour\".
+          function parseHourOption(opt) {
+            if (!opt) return null;
+            var text = String(opt.text || '');
+            var value = String(opt.value || '').trim();
+            var hText = text.toLowerCase().match(/(\\d+)\\s*h(?:our)?s?\\b/);
+            if (hText) return parseInt(hText[1], 10);
+            if (/^\\d+$/.test(value)) {
+              var n = parseInt(value, 10);
+              // Minute-encoded hours: 0, 60, 120… (not a plain 0–12 hour index).
+              if (n === 0) return 0;
+              if (n >= 60 && n % 60 === 0 && (n / 60) <= 24) return n / 60;
+              if (n >= 0 && n <= 12) return n;
+            }
+            var digits = parseInt(text.replace(/[^0-9]/g, ''), 10);
+            return isNaN(digits) ? null : digits;
+          }
+
+          function selectHourOptionNumbers(sel) {
+            var vals = [];
+            if (!sel || !sel.options) return vals;
+            for (var i = 0; i < sel.options.length; i++) {
+              var hours = parseHourOption(sel.options[i]);
+              if (hours == null || hours < 0) continue;
+              vals.push({
+                idx: i,
+                n: hours,
+                text: String(sel.options[i].text || ''),
+                value: String(sel.options[i].value || '')
+              });
+            }
+            return vals;
+          }
+
           function looksLikeHourSelect(sel) {
-            var vals = selectOptionNumbers(sel).map(function(v) { return v.n; });
+            var meta = ((sel.getAttribute('aria-label') || '') + ' ' + (sel.name || '') + ' ' + (sel.id || '')).toLowerCase();
+            if (/hour|hr\\b/.test(meta) && !/minute|\\bmin\\b/.test(meta)) return true;
+            var vals = selectHourOptionNumbers(sel).map(function(v) { return v.n; });
             if (!vals.length) return false;
             var max = Math.max.apply(null, vals);
             var min = Math.min.apply(null, vals);
-            // Hours: 0..12-ish. Minutes usually include 15/20/30/40/45 or go above 12.
+            // Hours: 0..12-ish after normalizing minute-encoded values.
             if (max > 12) return false;
             if (min < 0) return false;
             return true;
           }
 
           function looksLikeMinuteSelect(sel) {
+            var meta = ((sel.getAttribute('aria-label') || '') + ' ' + (sel.name || '') + ' ' + (sel.id || '')).toLowerCase();
+            if (/minute|\\bmin\\b/.test(meta) && !/hour|hr\\b/.test(meta)) return true;
             var vals = selectOptionNumbers(sel).map(function(v) { return v.n; });
             if (!vals.length) return false;
             var max = Math.max.apply(null, vals);
@@ -2151,6 +2189,23 @@ enum BookingFormPrefill {
               if (opts[i].n === wantNumber) return setSelectOptionIndex(sel, opts[i].idx);
             }
             return false;
+          }
+
+          function setHourSelectByHours(sel, wantHours) {
+            if (!sel || wantHours == null) return false;
+            var opts = selectHourOptionNumbers(sel);
+            for (var i = 0; i < opts.length; i++) {
+              if (opts[i].n === wantHours) return setSelectOptionIndex(sel, opts[i].idx);
+            }
+            // Fallbacks: plain value \"1\" or minute-encoded \"60\".
+            if (setSelectByNumber(sel, wantHours)) return true;
+            if (wantHours > 0 && setSelectByNumber(sel, wantHours * 60)) return true;
+            return false;
+          }
+
+          function readSelectedHourNumber(sel) {
+            if (!sel || !sel.options || sel.selectedIndex < 0) return null;
+            return parseHourOption(sel.options[sel.selectedIndex]);
           }
 
           function pickDurationCombobox(kindRe, wantNumber) {
@@ -2226,40 +2281,37 @@ enum BookingFormPrefill {
             return { hourSelect: hourSelect, minuteSelect: minuteSelect, combinedSelect: combinedSelect, selects: selects };
           }
 
-          function pickBestHourMinute(hourSelect, minuteSelect, maxMin) {
-            var maxH = Math.floor(maxMin / 60);
-            var hourOpts = selectOptionNumbers(hourSelect).filter(function(v) { return v.n >= 0 && v.n <= maxH; });
-            hourOpts.sort(function(a, b) { return b.n - a.n; });
-            // Preferred minutes include current options; also try common ParkMobile snaps after hour change.
-            var preferredMins = [40, 30, 20, 45, 15, 50, 10, 0];
-            for (var k = 0; k < hourOpts.length; k++) {
-              var candH = hourOpts[k];
-              var remain = maxMin - candH.n * 60;
-              var minuteOpts = selectOptionNumbers(minuteSelect);
-              var localBestM = -1;
-              var localBestIdx = -1;
-              for (var mi = 0; mi < minuteOpts.length; mi++) {
-                var mVal = minuteOpts[mi].n;
-                if (mVal <= remain && mVal > localBestM) {
-                  localBestM = mVal;
-                  localBestIdx = minuteOpts[mi].idx;
-                }
-              }
-              // If dependent minute list is still for hour=0, assume common snaps exist for higher hours.
-              if (localBestIdx < 0 && candH.n > 0) {
-                for (var p = 0; p < preferredMins.length; p++) {
-                  if (preferredMins[p] <= remain) {
-                    localBestM = preferredMins[p];
-                    localBestIdx = -2; // set by number after hour change
-                    break;
-                  }
-                }
-              }
-              if (localBestIdx !== -1) {
-                return { hour: candH.n, hourIdx: candH.idx, minute: localBestM, minuteIdx: localBestIdx };
+          /// Greedy hour under cap (don't read minutes yet — list may refresh after hour is set).
+          function pickBestHourUnderCap(hourSelect, maxMin) {
+            var hourOpts = selectHourOptionNumbers(hourSelect);
+            var best = null;
+            for (var i = 0; i < hourOpts.length; i++) {
+              var h = hourOpts[i].n;
+              if (h == null || h < 0 || (h * 60) > maxMin) continue;
+              if (!best || h > best.hour) {
+                best = { hour: h, hourIdx: hourOpts[i].idx };
               }
             }
-            return null;
+            return best;
+          }
+
+          /// After hour is fixed: largest live minute with hour×60 + m ≤ maxMin.
+          function bestMinuteUnderCap(minuteSelect, hour, maxMin) {
+            var remain = maxMin - (hour * 60);
+            if (remain < 0) return null;
+            var minuteOpts = selectOptionNumbers(minuteSelect);
+            var bestM = -1;
+            var bestIdx = -1;
+            for (var i = 0; i < minuteOpts.length; i++) {
+              var m = minuteOpts[i].n;
+              if (m == null || m < 0 || m > 59) continue;
+              if (m <= remain && m > bestM) {
+                bestM = m;
+                bestIdx = minuteOpts[i].idx;
+              }
+            }
+            if (bestIdx < 0) return null;
+            return { minute: bestM, minuteIdx: bestIdx, total: hour * 60 + bestM };
           }
 
           function selectGreatestDurationUpToMax() {
@@ -2297,51 +2349,63 @@ enum BookingFormPrefill {
             }
 
             if (hourSelect && minuteSelect) {
-              var best = pickBestHourMinute(hourSelect, minuteSelect, maxMin);
-              if (!best) {
+              // Greedy: largest hour ≤ 2h, set it, then largest live minute under the cap.
+              var bestHour = pickBestHourUnderCap(hourSelect, maxMin);
+              if (!bestHour) {
                 window.__parkingZoneDurationAttempts = attempts + 1;
                 if (!window.__parkingDurationDiagLogged) {
                   window.__parkingDurationDiagLogged = true;
                   bridge({
                     type: 'log',
-                    message: 'durationDiag no-best max=' + maxMin
-                      + ' hours=' + selectOptionNumbers(hourSelect).map(function(v) { return v.n; }).join(',')
-                      + ' mins=' + selectOptionNumbers(minuteSelect).map(function(v) { return v.n; }).join(',')
+                    message: 'durationDiag no-hour max=' + maxMin
+                      + ' hours=' + selectHourOptionNumbers(hourSelect).map(function(v) { return v.n + '@' + v.value; }).join(',')
                   });
                 }
                 return false;
               }
-              // Hour FIRST so dependent minute lists refresh for that hour, then minutes, then re-assert hour.
-              setSelectByNumber(hourSelect, best.hour) || setSelectOptionIndex(hourSelect, best.hourIdx);
-              pickDurationCombobox(/hour|hr/, best.hour);
-              if (best.minuteIdx >= 0) setSelectOptionIndex(minuteSelect, best.minuteIdx);
-              else setSelectByNumber(minuteSelect, best.minute);
-              pickDurationCombobox(/minute|min/, best.minute);
-              setSelectByNumber(hourSelect, best.hour) || setSelectOptionIndex(hourSelect, best.hourIdx);
-              pickDurationCombobox(/hour|hr/, best.hour);
-              // Re-pick minutes after hour re-assert (options may have just refreshed).
-              setSelectByNumber(minuteSelect, best.minute);
-              if (best.minuteIdx >= 0) setSelectOptionIndex(minuteSelect, best.minuteIdx);
+              setHourSelectByHours(hourSelect, bestHour.hour) || setSelectOptionIndex(hourSelect, bestHour.hourIdx);
+              pickDurationCombobox(/hour|hr/, bestHour.hour);
 
-              var gotH = readSelectedNumber(hourSelect);
+              var live = bestMinuteUnderCap(minuteSelect, bestHour.hour, maxMin);
+              if (!live) {
+                // Minute list not ready / empty after hour change — retry next pass.
+                window.__parkingZoneDurationAttempts = attempts + 1;
+                bridge({
+                  type: 'log',
+                  message: 'setDuration hour=' + bestHour.hour + ' min=pending max=' + maxMin
+                    + ' hourVal=' + (hourSelect.value || '')
+                    + ' attempt=' + window.__parkingZoneDurationAttempts
+                });
+                return false;
+              }
+              if (live.minuteIdx >= 0) setSelectOptionIndex(minuteSelect, live.minuteIdx);
+              else setSelectByNumber(minuteSelect, live.minute);
+              pickDurationCombobox(/minute|min/, live.minute);
+              // Re-assert hour (React sometimes resets it when minutes change).
+              setHourSelectByHours(hourSelect, bestHour.hour) || setSelectOptionIndex(hourSelect, bestHour.hourIdx);
+              live = bestMinuteUnderCap(minuteSelect, bestHour.hour, maxMin) || live;
+              if (live.minuteIdx >= 0) setSelectOptionIndex(minuteSelect, live.minuteIdx);
+              else setSelectByNumber(minuteSelect, live.minute);
+
+              var gotH = readSelectedHourNumber(hourSelect);
               var gotM = readSelectedNumber(minuteSelect);
+              var gotTotal = (gotH != null && gotM != null) ? (gotH * 60 + gotM) : -1;
+              var target = live.total;
               window.__parkingZoneDurationAttempts = attempts + 1;
-              var target = best.hour * 60 + best.minute;
               bridge({
                 type: 'log',
                 message: 'setDuration hour=' + gotH + ' min=' + gotM
-                  + ' target=' + target + 'm max=' + maxMin
+                  + ' total=' + gotTotal + 'm target=' + target + 'm max=' + maxMin
+                  + ' hourVal=' + (hourSelect.value || '')
+                  + ' minOpts=' + selectOptionNumbers(minuteSelect).map(function(v) { return v.n; }).join(',')
                   + ' attempt=' + window.__parkingZoneDurationAttempts
               });
-              // Only success when hour sticks — minutes-only used to false-succeed then Continue.
-              if (gotH === best.hour && gotM === best.minute) {
-                window.__parkingZoneDurationSet = true;
-                return true;
-              }
-              if (gotH === best.hour && gotM != null && (gotH * 60 + gotM) <= maxMin && (gotH * 60 + gotM) >= Math.min(maxMin, 60)) {
-                // Hour correct and total still a solid pick (e.g. 1h20 if 1h40 option raced away).
-                window.__parkingZoneDurationSet = true;
-                return true;
+              if (gotH === bestHour.hour && gotM != null && gotTotal <= maxMin) {
+                var liveNow = bestMinuteUnderCap(minuteSelect, gotH, maxMin);
+                if (liveNow && gotM === liveNow.minute) {
+                  window.__parkingZoneDurationSet = true;
+                  return true;
+                }
               }
               return false;
             }
@@ -2375,15 +2439,16 @@ enum BookingFormPrefill {
           function zoneDurationReadyForContinue() {
             if (!hasZoneDurationSelectors()) return true;
             if (window.__parkingZoneDurationSet) return true;
-            // Soft accept if UI already shows >= 1h when our cap allows it.
+            // Soft accept when UI already shows greedy hour + max live minute under the 2h cap.
             var found = findZoneHourMinuteSelects();
             if (found.hourSelect && found.minuteSelect) {
-              var h = readSelectedNumber(found.hourSelect);
-              var m = readSelectedNumber(found.minuteSelect);
               var maxMin = cfg.maxDurationMinutes || 120;
-              if (h != null && m != null) {
-                var total = h * 60 + m;
-                if (total > 0 && total <= maxMin && h >= Math.min(1, Math.floor(maxMin / 60))) return true;
+              var wantH = pickBestHourUnderCap(found.hourSelect, maxMin);
+              var h = readSelectedHourNumber(found.hourSelect);
+              var m = readSelectedNumber(found.minuteSelect);
+              if (wantH && h === wantH.hour && m != null) {
+                var live = bestMinuteUnderCap(found.minuteSelect, h, maxMin);
+                if (live && m === live.minute && live.total <= maxMin) return true;
               }
             }
             return false;
