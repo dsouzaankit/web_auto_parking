@@ -1324,6 +1324,9 @@ enum BookingFormPrefill {
             var t = (document.body && document.body.innerText) || '';
             if (/you are logged in as/i.test(t)) return true;
             if (/log\\s*out\\?/i.test(t)) return true;
+            // Logged-in checkout no longer shows the Cognito login form.
+            if (!document.querySelector('#aws-cognito-log-in')
+                && document.querySelector('#gpi-checkout-submit')) return true;
             return false;
           }
 
@@ -1332,40 +1335,73 @@ enum BookingFormPrefill {
             if (parkChirpIsSignedIn()) return false;
             var t = (document.body && document.body.innerText) || '';
             if (/you need to log in or create an account/i.test(t)) return true;
-            if (document.querySelector('input[type=\"password\"]')) return true;
+            if (document.querySelector('#aws-cognito-log-in #login-password, #aws-cognito-log-in input[type=\"password\"]')) {
+              return true;
+            }
             // Checkout shell visible but session not confirmed yet.
             if (document.querySelector('#gpi-checkout-submit')) return true;
             return false;
           }
 
+          function parkChirpLoginForm() {
+            return document.querySelector('#aws-cognito-log-in')
+              || document.querySelector('form[name=\"aws-cognito-log-in\"]');
+          }
+
+          function parkChirpFieldLooksAutofilled(el) {
+            if (!el) return false;
+            if (String(el.value || '').length > 0) return true;
+            try {
+              if (el.matches && el.matches(':-webkit-autofill')) return true;
+            } catch (e) {}
+            try {
+              // iOS often paints autofill without exposing .value to JS.
+              var bg = window.getComputedStyle(el).webkitBackgroundClip || '';
+              var color = window.getComputedStyle(el).backgroundColor || '';
+              if (/autofill/i.test(el.className || '')) return true;
+              if (color && color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent'
+                  && /rgb\\(\\s*250\\s*,\\s*255\\s*,\\s*189/i.test(color)) return true;
+            } catch (e2) {}
+            return false;
+          }
+
           function parkChirpFindLoginFields() {
-            var pass = null;
-            var passes = document.querySelectorAll('input[type=\"password\"]');
-            for (var i = 0; i < passes.length; i++) {
-              if (visible(passes[i])) { pass = passes[i]; break; }
+            var form = parkChirpLoginForm();
+            if (!form || !visible(form)) {
+              // Form may be in a tab; still prefer Cognito ids over Create Account passwords.
+              form = parkChirpLoginForm();
             }
-            if (!pass) return null;
-            var email = null;
-            var root = pass.form || pass.closest('form') || pass.parentElement || document;
-            var inputs = root.querySelectorAll('input[type=\"email\"], input[type=\"text\"], input:not([type])');
-            for (var j = 0; j < inputs.length; j++) {
-              var el = inputs[j];
-              if (!visible(el)) continue;
-              var key = classify(el);
-              var looksEmail = key === 'email' || /email/i.test(el.name || '') || /email/i.test(el.id || '')
-                || /email/i.test(el.placeholder || '') || /username/i.test(el.autocomplete || '');
-              if (looksEmail) { email = el; break; }
-            }
-            return { email: email, password: pass, form: pass.form || null };
+            var email = form
+              ? (form.querySelector('#login-email-address, input[name=\"login-email-address\"], input[type=\"email\"]') || null)
+              : firstVisible('#login-email-address, input[name=\"login-email-address\"]');
+            var pass = form
+              ? (form.querySelector('#login-password, input[name=\"login-password\"], input[type=\"password\"]') || null)
+              : firstVisible('#login-password, input[name=\"login-password\"]');
+            if (!pass || !visible(pass)) return null;
+            if (email && !visible(email)) email = null;
+            return { email: email, password: pass, form: form || pass.form || null };
+          }
+
+          function fillParkChirpLoginEmail() {
+            if (!cfg.email) return false;
+            var fields = parkChirpFindLoginFields();
+            if (!fields || !fields.email) return false;
+            var cur = String(fields.email.value || '').trim();
+            if (cur && norm(cur) === norm(cfg.email)) return false;
+            if (cur && cur.indexOf('@') !== -1) return false;
+            return setNativeValue(fields.email, cfg.email);
           }
 
           /// Hint iOS Password AutoFill toward saved parkchirp.com credentials (QuickType / key icon).
-          /// Fields already use autocomplete=username/current-password; focus surfaces the suggestions.
+          /// Prefills BookingConfig email; re-hints periodically while waiting.
           function hintParkChirpPasswordAutofill() {
             if (!isParkChirp() || parkChirpIsSignedIn()) return false;
-            if (window.__parkingParkChirpAutofillHint) return false;
+            var now = Date.now();
+            if (window.__parkingParkChirpAutofillAt
+                && (now - window.__parkingParkChirpAutofillAt) < 6000) return false;
             var fields = parkChirpFindLoginFields();
             if (!fields || !fields.password) return false;
+            fillParkChirpLoginEmail();
             try {
               if (fields.email) {
                 fields.email.setAttribute('autocomplete', 'username');
@@ -1378,7 +1414,11 @@ enum BookingFormPrefill {
               ensureInView(target);
               try { target.focus(); } catch (e) {}
               try { target.click(); } catch (e) {}
-              window.__parkingParkChirpAutofillHint = true;
+              // Second focus on password helps QuickType after username is set.
+              if (fields.email && fields.password && String(fields.email.value || '').indexOf('@') !== -1) {
+                try { fields.password.focus(); } catch (e2) {}
+              }
+              window.__parkingParkChirpAutofillAt = now;
               return true;
             } catch (e) {
               return false;
@@ -1387,48 +1427,81 @@ enum BookingFormPrefill {
 
           function parkChirpLoginFieldsFilled() {
             var fields = parkChirpFindLoginFields();
-            if (!fields || !fields.password || !(fields.password.value || '').length) return null;
-            if (!fields.email || (fields.email.value || '').indexOf('@') === -1) return null;
+            if (!fields || !fields.password) return null;
+            var emailOk = fields.email
+              && (String(fields.email.value || '').indexOf('@') !== -1 || parkChirpFieldLooksAutofilled(fields.email));
+            var passOk = parkChirpFieldLooksAutofilled(fields.password);
+            if (!emailOk || !passOk) return null;
             return fields;
           }
 
           function findParkChirpLoginSubmit(fields) {
             if (!fields) return null;
-            var scope = fields.form || (fields.password && fields.password.closest('form')) || document;
+            var scope = fields.form || parkChirpLoginForm() || document;
             var buttons = scope.querySelectorAll('button, input[type=\"submit\"]');
             for (var i = 0; i < buttons.length; i++) {
               var b = buttons[i];
               if (!visible(b)) continue;
               var label = norm(b.innerText || b.value || '');
-              // Login Submit — skip Create Account / Checkout / Apply.
-              if (label === 'submit' || label === 'loginsubmit' || label === 'login' || label === 'signin') {
-                if (/checkout|apply|create|register|subscribe/i.test(label)) continue;
+              if (/checkout|apply|create|register|subscribe|apple|sso|forgot/i.test(label)) continue;
+              // Cognito login uses a green \"Submit\" button (not \"Login Submit\").
+              if (label === 'submit' || label === 'loginsubmit' || label === 'login'
+                  || label === 'signin' || label === 'logon') {
                 return b;
               }
             }
-            // Fallback: submit nearest password field's form.
-            if (fields.form) {
-              var fallback = fields.form.querySelector('button[type=\"submit\"], input[type=\"submit\"], button');
-              if (fallback && visible(fallback)) {
-                var fl = norm(fallback.innerText || fallback.value || '');
-                if (!/checkout|apply|create|register|subscribe/i.test(fl)) return fallback;
-              }
+            var fallback = scope.querySelector('button.button-spinner, button.button-green, button[type=\"submit\"], input[type=\"submit\"]');
+            if (fallback && visible(fallback)) {
+              var fl = norm(fallback.innerText || fallback.value || '');
+              if (!/checkout|apply|create|register|subscribe|apple|sso|forgot/i.test(fl)) return fallback;
             }
             return null;
           }
 
-          /// After iOS/Apple Password AutoFill fills email+password, tap Login Submit once.
+          function logParkChirpLoginDiagnostics() {
+            var now = Date.now();
+            if (window.__parkingParkChirpLoginDiagAt && (now - window.__parkingParkChirpLoginDiagAt) < 8000) return;
+            window.__parkingParkChirpLoginDiagAt = now;
+            var fields = parkChirpFindLoginFields();
+            var btn = findParkChirpLoginSubmit(fields);
+            bridge({
+              type: 'log',
+              message: 'parkChirpLoginDiag email=' + (fields && fields.email
+                  ? (String(fields.email.value || '').trim() || (parkChirpFieldLooksAutofilled(fields.email) ? 'autofill' : 'empty'))
+                  : 'missing')
+                + ' pass=' + (fields && fields.password
+                  ? ((fields.password.value || '').length ? 'len' + String(fields.password.value).length
+                    : (parkChirpFieldLooksAutofilled(fields.password) ? 'autofill' : 'empty'))
+                  : 'missing')
+                + ' btn=' + (btn ? ((btn.innerText || '').trim().slice(0, 20)) : 'missing')
+                + ' signedIn=' + parkChirpIsSignedIn()
+            });
+          }
+
+          /// After iOS/Apple Password AutoFill fills email+password, tap Cognito Submit once.
           function submitParkChirpLoginIfAutofilled() {
             if (!isParkChirp() || parkChirpIsSignedIn()) return false;
             if (window.__parkingParkChirpLoginAt && (Date.now() - window.__parkingParkChirpLoginAt) < 8000) {
               return false;
             }
+            fillParkChirpLoginEmail();
             var fields = parkChirpLoginFieldsFilled();
             if (!fields) return false;
             var btn = findParkChirpLoginSubmit(fields);
-            if (!btn) return false;
+            if (!btn) {
+              if (fields.form && typeof fields.form.requestSubmit === 'function') {
+                try {
+                  fields.form.requestSubmit();
+                  window.__parkingParkChirpLoginAt = Date.now();
+                  bridge({ type: 'log', message: 'parkChirp login requestSubmit' });
+                  return true;
+                } catch (e) {}
+              }
+              return false;
+            }
             if (click(btn)) {
               window.__parkingParkChirpLoginAt = Date.now();
+              bridge({ type: 'log', message: 'parkChirp login Submit tapped' });
               return true;
             }
             return false;
@@ -2623,10 +2696,12 @@ enum BookingFormPrefill {
               return { status: 'advanced', filled: 0, action: 'loginSubmit' };
             }
             if (parkChirpNeedsSignIn() || !parkChirpIsSignedIn()) {
+              var emailFilled = fillParkChirpLoginEmail() ? 1 : 0;
+              logParkChirpLoginDiagnostics();
               if (hintParkChirpPasswordAutofill()) {
-                return { status: 'advanced', filled: 0, action: 'autofillHint' };
+                return { status: 'advanced', filled: emailFilled, action: 'autofillHint' };
               }
-              return { status: 'waiting', filled: 0, action: 'awaitSignIn' };
+              return { status: 'waiting', filled: emailFilled, action: 'awaitSignIn' };
             }
             var filled = 0;
             // Prefer configured plate when several radios exist.
