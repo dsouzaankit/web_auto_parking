@@ -19,7 +19,7 @@ Optional signed builds: set secrets `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `
 
 Workflow: [`.github/workflows/ios-build.yml`](../.github/workflows/ios-build.yml).
 
-App icon: `WebAutoParking/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png` (home screen / Settings / AltStore after IPA install).
+App icon: single `AppIcon.appiconset/AppIcon.png` (1024) + `CFBundleIconName` in Info.plist — same pattern as Loop Segments (multi-size catalog regressed Control Center / loose icon PNGs).
 
 ## Install (AltStore)
 

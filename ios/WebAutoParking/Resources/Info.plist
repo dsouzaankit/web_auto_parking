@@ -3,6 +3,9 @@
 <plist version="1.0">
 <dict>
 	<!-- Merged with GENERATE_INFOPLIST_FILE (launch screen / scene). Keep privacy + ATS here. -->
+	<!-- Match Loop Segments: explicit icon name so AltStore / Control Center get CFBundleIconFiles. -->
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Parking uses your location to find the nearest ParkMobile zone on the Zone tab.</string>
 	<key>NSLocalNetworkUsageDescription</key>
