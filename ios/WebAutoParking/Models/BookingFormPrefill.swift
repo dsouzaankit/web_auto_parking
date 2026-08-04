@@ -1715,13 +1715,37 @@ enum BookingFormPrefill {
             return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
           }
 
+          /// On-street Search Zones only — never /search/transient (offstreet garage location_ids).
+          function isOnStreetZonesSearchUrl(url) {
+            var u = String(url || '');
+            if (!/\\/api\\/zones\\/search/i.test(u)) return false;
+            if (/\\/api\\/zones\\/search\\/transient/i.test(u)) return false;
+            return true;
+          }
+
           function cacheZonesSearchPayload(data, via) {
             var list = Array.isArray(data) ? data
               : (data && (data.zones || data.results || data.items || data.data)) || [];
             if (!Array.isArray(list) || !list.length) return;
-            window.__parkingZoneApiResults = list;
+            // Keep OnStreet rows with a real internalZoneCode (e.g. 30447328).
+            // Transient/offstreet payloads use location_id and 404 on /zone/start.
+            var onStreet = [];
+            for (var i = 0; i < list.length; i++) {
+              var z = list[i] || {};
+              var typ = String(z.type || z.parkingType || z.zoneType || '').toLowerCase();
+              if (typ === 'offstreet' || typ === 'off-street' || typ === 'garage') continue;
+              if (z.location_id && !z.internalZoneCode && !z.internalCode) continue;
+              var internal = String(z.internalZoneCode || z.internalCode || '').trim();
+              if (!internal || !/^\\d{5,}$/.test(internal)) continue;
+              onStreet.push(z);
+            }
+            if (!onStreet.length) {
+              bridge({ type: 'log', message: 'zones ' + via + ' ignored (no on-street internals) raw=' + list.length });
+              return;
+            }
+            window.__parkingZoneApiResults = onStreet;
             window.__parkingNearestZoneFetchedAt = Date.now();
-            bridge({ type: 'log', message: 'zones ' + via + ' cached count=' + list.length });
+            bridge({ type: 'log', message: 'zones ' + via + ' cached count=' + onStreet.length });
           }
 
           /// Cache SPA /api/zones/search — ParkMobile uses XHR; our own fetch often 422s.
@@ -1738,7 +1762,7 @@ enum BookingFormPrefill {
                   var url = (typeof req === 'string') ? req : ((req && req.url) || '');
                   return orig.apply(this, args).then(function(res) {
                     try {
-                      if (/\\/api\\/zones\\/search/i.test(url) && res && res.ok && res.clone) {
+                      if (isOnStreetZonesSearchUrl(url) && res && res.ok && res.clone) {
                         res.clone().json().then(function(data) {
                           cacheZonesSearchPayload(data, 'fetch');
                         }).catch(function() {});
@@ -1759,7 +1783,7 @@ enum BookingFormPrefill {
               XMLHttpRequest.prototype.send = function() {
                 var xhr = this;
                 var url = xhr.__parkingZoneUrl || '';
-                if (/\\/api\\/zones\\/search/i.test(url)) {
+                if (isOnStreetZonesSearchUrl(url)) {
                   xhr.addEventListener('load', function() {
                     try {
                       if (xhr.status < 200 || xhr.status >= 300) return;
@@ -1957,24 +1981,29 @@ enum BookingFormPrefill {
           function zoneCandidatesFromApi() {
             var list = window.__parkingZoneApiResults || [];
             var out = [];
+            // Address slug search (/search/hoboken-nj-usa): prefer API distance to map center.
+            // cfg lat/lng is the garage stub and can be tens of km away.
+            var addressSearch = /\\/search\\/[^/]+/i.test(location.pathname || '');
             for (var i = 0; i < list.length; i++) {
               var z = list[i] || {};
               // Public Zone # is signageCode (e.g. 47039); internalZoneCode is e.g. 30447039.
               var zoneID = String(z.signageCode || z.zoneCode || z.zoneNumber || z.displayZoneCode
-                || z.publicZoneCode || z.zone || z.code || '');
-              var internal = String(z.internalZoneCode || z.internalCode || '');
+                || z.publicZoneCode || z.zone || '');
+              var internal = String(z.internalZoneCode || z.internalCode || '').trim();
+              if (!internal || !/^\\d{5,}$/.test(internal)) continue;
               var pt = zonePointLatLng(z);
               var dist = null;
-              if (cfg.lat != null && cfg.lng != null && pt) {
-                dist = haversineMeters(cfg.lat, cfg.lng, pt.lat, pt.lng);
-              } else if (typeof z.distance === 'number') {
-                dist = z.distance;
+              if (addressSearch && typeof z.distanceMiles === 'number') {
+                dist = z.distanceMiles * 1609.34;
               } else if (typeof z.distanceInMeters === 'number') {
                 dist = z.distanceInMeters;
+              } else if (typeof z.distance === 'number') {
+                dist = z.distance;
               } else if (typeof z.distanceMiles === 'number') {
                 dist = z.distanceMiles * 1609.34;
+              } else if (!addressSearch && cfg.lat != null && cfg.lng != null && pt) {
+                dist = haversineMeters(cfg.lat, cfg.lng, pt.lat, pt.lng);
               }
-              if (!zoneID && !internal) continue;
               out.push({
                 zoneID: zoneID || internal,
                 signageCode: zoneID,
@@ -1982,7 +2011,7 @@ enum BookingFormPrefill {
                 label: z.locationName || z.supplierName || z.name
                   ? String(z.locationName || z.supplierName || z.name)
                   : ('Zone # ' + (zoneID || internal)),
-                href: internal ? ('/zone/start?internalZoneCode=' + encodeURIComponent(internal)) : '',
+                href: '/zone/start?internalZoneCode=' + encodeURIComponent(internal),
                 el: null,
                 distanceMeters: dist,
                 order: i
@@ -2623,16 +2652,31 @@ enum BookingFormPrefill {
 
             // /search — SPA owns zones/search XHR; auto Park Here nearest, then stop on zone-id page.
             if (isZoneSearchPage()) {
+              var searchPath = location.pathname || '';
+              if (window.__parkingZoneSearchPath !== searchPath) {
+                window.__parkingZoneSearchPath = searchPath;
+                window.__parkingZoneApiResults = [];
+                window.__parkingNearestZoneCandidate = null;
+                window.__parkingZoneActivated = false;
+                window.__parkingAwaitZonesLogged = false;
+                // Address geocode (/search/hoboken-nj-usa) replaces geo; don't keep Atlanta/stub picks.
+                if (/\\/search\\/[^/]+/i.test(searchPath)) {
+                  window.__parkingDidTapGeo = true;
+                  window.__parkingGeoTappedAt = Date.now();
+                  bridge({ type: 'log', message: 'address search path — cleared zone cache' });
+                }
+              }
               if (dismissCookieBanner()) {
                 return { status: 'advanced', filled: 0, action: 'cookie' };
               }
               if (clickSearchZonesMode()) {
                 return { status: 'advanced', filled: 0, action: 'searchZonesMode' };
               }
-              if (clickGetUserLocation()) {
+              var addressSearch = /\\/search\\/[^/]+/i.test(searchPath);
+              if (!addressSearch && clickGetUserLocation()) {
                 return { status: 'advanced', filled: 0, action: 'geo' };
               }
-              if (!window.__parkingDidTapGeo) {
+              if (!addressSearch && !window.__parkingDidTapGeo) {
                 return { status: 'waiting', filled: 0, action: 'awaitGeoButton' };
               }
               var geoAge = window.__parkingGeoTappedAt ? (Date.now() - window.__parkingGeoTappedAt) : 0;
@@ -2652,6 +2696,9 @@ enum BookingFormPrefill {
                   window.__parkingAwaitZonesLogged = true;
                   bridge({ type: 'log', message: 'awaitZones timeout api=' + apiCount + ' dom=' + domCount });
                 }
+                return { status: 'waiting', filled: 0, action: 'awaitZones' };
+              }
+              if (!candidate.internalZoneCode || !/^\\d{5,}$/.test(String(candidate.internalZoneCode))) {
                 return { status: 'waiting', filled: 0, action: 'awaitZones' };
               }
               if (activateNearestZone(candidate)) {
