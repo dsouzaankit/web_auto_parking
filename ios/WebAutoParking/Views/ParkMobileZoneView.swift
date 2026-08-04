@@ -12,7 +12,7 @@ struct ParkMobileZoneView: View {
             mode: .parkMobileZone,
             latitude: location.coordinate?.latitude,
             longitude: location.coordinate?.longitude,
-            maxDurationMinutes: 100,
+            maxDurationMinutes: 120,
             zoneAutomationEnabled: true
         )
     }

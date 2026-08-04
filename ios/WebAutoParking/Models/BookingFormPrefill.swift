@@ -2060,7 +2060,7 @@ enum BookingFormPrefill {
               window.__parkingZoneDurationAttempts = 0;
               attempts = 0;
             }
-            var maxMin = cfg.maxDurationMinutes || 100;
+            var maxMin = cfg.maxDurationMinutes || 120;
             var found = findZoneHourMinuteSelects();
             var hourSelect = found.hourSelect;
             var minuteSelect = found.minuteSelect;
@@ -2170,7 +2170,7 @@ enum BookingFormPrefill {
             if (found.hourSelect && found.minuteSelect) {
               var h = readSelectedNumber(found.hourSelect);
               var m = readSelectedNumber(found.minuteSelect);
-              var maxMin = cfg.maxDurationMinutes || 100;
+              var maxMin = cfg.maxDurationMinutes || 120;
               if (h != null && m != null) {
                 var total = h * 60 + m;
                 if (total > 0 && total <= maxMin && h >= Math.min(1, Math.floor(maxMin / 60))) return true;
