@@ -182,7 +182,22 @@ enum SessionWindow {
         return (start, end)
     }
 
+    /// First evening window with start still in the future (avoids SPA overnight `$30` rewrite on a past 5:30).
+    /// Falls back to `futureDays` ahead at 5:30–11:30 if somehow every candidate is past.
+    static func parkChirpFirstViableEveningWindow(
+        from date: Date = .now,
+        calendar: Calendar = .current,
+        futureDays: Int = 2
+    ) -> (start: Date, end: Date) {
+        if let first = parkChirpEveningCandidates(on: date, calendar: calendar, futureDays: futureDays).first {
+            return first
+        }
+        let fallbackDay = calendar.date(byAdding: .day, value: max(futureDays, 1), to: date) ?? date
+        return parkChirpLockedEveningWindow(on: fallbackDay, calendar: calendar)
+    }
+
     /// Today through `current + futureDays` (default **+2**): for each day, start **5:30…11:00 PM**, end **11:30 PM**.
+    /// Skips starts already in the past (opening a past 5:30 makes ParkChirp rewrite to overnight `$30`).
     /// Prefill walks until the SPA accepts as-is, or the last day is exhausted — whichever is earlier.
     static func parkChirpEveningCandidates(
         on date: Date = .now,
@@ -201,6 +216,8 @@ enum SessionWindow {
                 let minute = mark % 60
                 guard let start = calendar.date(bySettingHour: hour, minute: minute, second: 0, of: day)
                 else { continue }
+                // Past starts → SPA often force-rewrites to next-day overnight package.
+                if start <= date { continue }
                 out.append((start, end))
             }
         }
