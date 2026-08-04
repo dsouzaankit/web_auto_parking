@@ -96,10 +96,6 @@ Presets above are saved by default in that order (existing installs pick up miss
 - If hour/minute selectors are missing, keeps tapping **Continue**.
 - Capture notes / expected APIs: [`ai/parkmobile_zone_xhr/README.md`](ai/parkmobile_zone_xhr/README.md).
 
-## Control Center
-
-Add **Controls → Parking** (opens the app; uses SF Symbol `parkingsign`). The system **Open App** control often blanks icons for AltStore sideloads — use the Parking control instead.
-
 ## Build & install (no Mac)
 
 See [ios/BUILD-WITHOUT-MAC.md](ios/BUILD-WITHOUT-MAC.md). Short path:

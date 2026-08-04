@@ -19,9 +19,7 @@ Optional signed builds: set secrets `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `
 
 Workflow: [`.github/workflows/ios-build.yml`](../.github/workflows/ios-build.yml).
 
-App icon: same packaging as Loop Segments — single `AppIcon.appiconset/AppIcon.png` (1024), `CFBundleIconName`, `TARGETED_DEVICE_FAMILY: "1,2"`. After icon changes: **delete Parking**, install IPA, reboot if home-screen icon stays blank.
-
-Control Center: prefer **Controls → Parking** (embedded `ParkingControls` widget, SF Symbol `parkingsign`). The system **Open App** picker often shows a blank icon for sideloaded apps even when the home-screen icon is correct.
+App icon: same packaging as Loop Segments — single `AppIcon.appiconset/AppIcon.png` (1024), `CFBundleIconName`, `TARGETED_DEVICE_FAMILY: "1,2"`, catalog via main target sources (not a separate `resources` entry). After icon changes: **delete Parking on the phone**, then install the new IPA (SpringBoard/Control Center cache blanks).
 
 ## Install (AltStore)
 

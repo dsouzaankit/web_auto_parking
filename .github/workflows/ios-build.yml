@@ -135,12 +135,6 @@ jobs:
               echo "ERROR: AppIcon60x60@2x.png missing from IPA"
               exit 1
             fi
-            if ! find ipa-verify -path '*/WebAutoParking.app/PlugIns/ParkingControls.appex' -type d | grep -q .; then
-              echo "ERROR: ParkingControls.appex missing (Control Center Open Parking control)"
-              find ipa-verify -path '*/PlugIns/*' -maxdepth 5 2>/dev/null || true
-              exit 1
-            fi
-            echo "OK: ParkingControls.appex embedded"
             rm -rf ipa-verify
           }
 
