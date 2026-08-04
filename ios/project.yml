@@ -8,6 +8,25 @@ settings:
   base:
     SWIFT_VERSION: "5.9"
 targets:
+  ParkingControls:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: ParkingControls
+      - path: SharedControls
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.webautoparking.app.ParkingControls
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_FILE: ParkingControls/Info.plist
+        INFOPLIST_KEY_CFBundleDisplayName: Parking
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"
+        SKIP_INSTALL: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "60"
+        PRODUCT_NAME: ParkingControls
   WebAutoParking:
     type: application
     platform: iOS
@@ -20,6 +39,7 @@ targets:
       - path: WebAutoParking/Resources/BookingConfig.json
         buildPhase: resources
         type: file
+      - path: SharedControls
     settings:
       base:
         # Merge generated launch screen / scene keys with Privacy Info.plist (same as Loop Segments).
@@ -31,7 +51,16 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         PRODUCT_BUNDLE_IDENTIFIER: com.webautoparking.app
         MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "59"
+        CURRENT_PROJECT_VERSION: "60"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MACCATALYST: NO
+    dependencies:
+      - target: ParkingControls
+        embed: true
+schemes:
+  WebAutoParking:
+    build:
+      targets:
+        WebAutoParking: all
+        ParkingControls: all
