@@ -24,7 +24,7 @@ App icon: same packaging as Loop Segments — single `AppIcon.appiconset/AppIcon
 ## Install (AltStore)
 
 1. AltServer on PC + AltStore on phone (same Wi‑Fi; free Apple ID).
-2. On the **iPhone**: **AltStore → My Apps → +** → pick the timestamped IPA from iCloud Downloads. If AltStore says **invalid format** / **incorrect format**: force-quit and reopen AltStore, wait for full iCloud sync, then retry; if it still fails, **AltServer → Sideload** the same file from the PC.
+2. On the **iPhone**: **AltStore → My Apps → +** → pick the timestamped IPA from iCloud Downloads. **invalid format** / **incorrect format** is often benign (partial iCloud sync or a flaky AltStore handoff) — if Parking shows under My Apps and opens, ignore the toast. Only force-quit/reopen AltStore, wait for full sync, then retry (or **AltServer → Sideload** the same file from the PC) if it never installs.
 3. Wait until Files shows the **full size** before installing from iCloud.
 4. **Settings → General → VPN & Device Management** → Trust your Apple ID (first install).
 5. Free Apple ID cert lasts ~7 days — **Refresh** in AltStore before expiry (no new IPA; retry if that flakes — same error string, different cause).
