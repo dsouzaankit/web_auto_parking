@@ -14,7 +14,7 @@ Automation:
 4. Pick nearest zone (haversine vs native lat/lng, else first Park Here)
 5. **Park Here** → `/zone/start?internalZoneCode=…` (zone-id prefilled)
 6. **You** tap Confirm Zone / Continue on that first zone-id page (automation does not auto-submit it)
-7. Duration ≤ 2h → Continue through guest/contact/vehicle → Apple Pay prep
+7. Duration ≤ 2h40 → Continue through guest/contact/vehicle → Apple Pay prep
 
 ## Learned from live XHR (build 41, `/zone/start` attempt)
 
@@ -47,7 +47,7 @@ User typed signage codes; SPA resolved via proxy:
 | `GET /api/zones/30447039` | parkInfo + hour/minute selections |
 | `GET /api/proxy/parkmobileapi/price/30447039?timeBlockId=-1&timeBlockQuantity=…` | pricing |
 
-Duration options (Hoboken): hours `0/1/2`, minutes include `20,40` (and `0` at 1h+) — cap automation at **120 minutes** → **2h**.
+Duration options (Hoboken): hours `0/1/2` (zone max may be lower), minutes include `20,40` (and `0` at 1h+) — app cap **160 minutes** → **2h40** when the zone offers it.
 
 ## What to export for refinement
 

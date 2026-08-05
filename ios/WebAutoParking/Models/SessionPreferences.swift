@@ -33,6 +33,7 @@ enum ZoneDurationOption: Int, CaseIterable, Identifiable {
     case m40 = 40
     case m80 = 80
     case m120 = 120
+    case m160 = 160
 
     var id: Int { rawValue }
 
@@ -41,13 +42,14 @@ enum ZoneDurationOption: Int, CaseIterable, Identifiable {
         case .m40: return "40m"
         case .m80: return "1h20"
         case .m120: return "2h"
+        case .m160: return "2h40"
         }
     }
 
     static func clamped(_ minutes: Int) -> Int {
         let allowed = allCases.map(\.rawValue)
         if allowed.contains(minutes) { return minutes }
-        return ZoneDurationOption.m120.rawValue
+        return ZoneDurationOption.m160.rawValue
     }
 }
 
@@ -78,7 +80,7 @@ final class SessionPreferences: ObservableObject {
         }
     }
 
-    /// Zone tab duration cap (40 / 80 / 120). Automation picks the largest available ≤ this.
+    /// Zone tab duration cap (40 / 80 / 120 / 160). Automation picks the largest available ≤ this.
     @Published var zoneMaxDurationMinutes: Int {
         didSet {
             let clamped = ZoneDurationOption.clamped(zoneMaxDurationMinutes)
@@ -109,7 +111,7 @@ final class SessionPreferences: ObservableObject {
                 UserDefaults.standard.integer(forKey: zoneDurationKey)
             )
         } else {
-            zoneMaxDurationMinutes = ZoneDurationOption.m120.rawValue
+            zoneMaxDurationMinutes = ZoneDurationOption.m160.rawValue
         }
     }
 }

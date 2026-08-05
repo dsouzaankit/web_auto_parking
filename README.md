@@ -1,6 +1,6 @@
 # Web Auto Parking (iOS)
 
-SwiftUI wrapper that opens provider checkout in a `WKWebView`, defaulting to the **last 15-minute mark** start (toggle ASAP / −15m / −30m), with automated guest/contact/vehicle steps on ParkMobile and SpotHero, plus ParkChirp Harbor (sign-in, evening window walk), and a **Zone** tab for ParkMobile `/search` (nearby geo auto-pick or street-address pause → Confirm Zone → duration ≤ **40m / 1h20 / 2h** → Apple Pay prep).
+SwiftUI wrapper that opens provider checkout in a `WKWebView`, defaulting to the **last 15-minute mark** start (toggle ASAP / −15m / −30m), with automated guest/contact/vehicle steps on ParkMobile and SpotHero, plus ParkChirp Harbor (sign-in, evening window walk), and a **Zone** tab for ParkMobile `/search` (nearby geo auto-pick or street-address pause → Confirm Zone → duration ≤ **40m…2h40** → Apple Pay prep).
 
 ## Prefill config (edit by hand)
 
@@ -87,7 +87,7 @@ Presets above are saved by default in that order (existing installs pick up miss
 | Tab | Behavior |
 |-----|----------|
 | **Garages** | Saved facilities → provider checkout (garage automation path) |
-| **Zone** | Opens [`app.parkmobile.io/search`](https://app.parkmobile.io/search). Segmented **Duration** (**40m / 1h20 / 2h**, persisted). **Search Zones** → **Get user location** → nearest **Park Here** only if within ~2.5 km of GPS (won’t grab default Atlanta map zones). If nothing nearby, automation **pauses** so you can type a street address (or tap Park Here); after `/search/{place}` it resumes. Then you tap **Confirm Zone** on the zone-id page (Zone # gets `inputmode=numeric`; ABC/globe still switches — no `pattern=[0-9]*` lock) → duration ≤ chosen cap → guest → contact → vehicle → Apple Pay prep. |
+| **Zone** | Opens [`app.parkmobile.io/search`](https://app.parkmobile.io/search). Segmented **Duration** (**40m / 1h20 / 2h** and **2h40**, persisted; default **2h40**). **Search Zones** → **Get user location** → nearest **Park Here** only if within ~2.5 km of GPS (won’t grab default Atlanta map zones). If nothing nearby, automation **pauses** so you can type a street address (or tap Park Here); after `/search/{place}` it resumes. Then you tap **Confirm Zone** on the zone-id page (Zone # gets `inputmode=numeric`; ABC/globe still switches — no `pattern=[0-9]*` lock) → duration ≤ chosen cap → guest → contact → vehicle → Apple Pay prep. |
 
 ### Zone flow notes
 
@@ -95,7 +95,7 @@ Presets above are saved by default in that order (existing installs pick up miss
 - Prefill caches only on-street `/api/zones/search` (ignores `/search/transient` garage `location_id`s). Auto **Park Here** needs a real `internalZoneCode` (e.g. `30447328`) **and** distance ≤ ~2.5 km from GPS — never the undated default-map (Atlanta) list. If geo finds nothing nearby, logs `awaitAddressSearch` and stops so you can type an address; `/search/{place}` clears the cache and resumes (ranks by API distance to map center) for remote price checks.
 - **Confirm Zone** is always manual (automation never taps that CTA). After you submit, loops **Continue** until `https://app.parkmobile.io/zone/auth?checkoutState=…`.
 - On submit errors, waits for **manual re-submit**, then resumes the Continue loop.
-- Duration (greedy under the Zone **Duration** picker: **40 / 80 / 120** min, default **2h**): pick the largest `#hours` with `h×60 ≤ max` (values may be minute-encoded, e.g. `value="60"` = **1 Hour**), set it, then pick the largest live `#minutes` with total ≤ max. Don’t score minutes before the hour is fixed — that list can refresh (20m/40m steps plus an odd leftover for the zone max).
+- Duration (greedy under the Zone **Duration** picker: **40 / 80 / 120 / 160** min, default **2h40**): pick the largest `#hours` with `h×60 ≤ max` (values may be minute-encoded, e.g. `value="60"` = **1 Hour**), set it, then pick the largest live `#minutes` with total ≤ max. Don’t score minutes before the hour is fixed — that list can refresh (20m/40m steps plus an odd leftover for the zone max).
 - If hour/minute selectors are missing, keeps tapping **Continue**.
 - Guest Zone checkout uses the same email/phone prefill as garages; sessions still won’t sync into the ParkMobile app for extend (see guest note above). Zone must also allow extensions and not already be at max duration.
 - Capture notes / expected APIs: [`ai/parkmobile_zone_xhr/README.md`](ai/parkmobile_zone_xhr/README.md).

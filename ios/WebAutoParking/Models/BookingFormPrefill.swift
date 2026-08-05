@@ -2450,7 +2450,7 @@ enum BookingFormPrefill {
               window.__parkingZoneDurationAttempts = 0;
               attempts = 0;
             }
-            var maxMin = cfg.maxDurationMinutes || 120;
+            var maxMin = cfg.maxDurationMinutes || 160;
             var found = findZoneHourMinuteSelects();
             var hourSelect = found.hourSelect;
             var minuteSelect = found.minuteSelect;
@@ -2477,7 +2477,7 @@ enum BookingFormPrefill {
             }
 
             if (hourSelect && minuteSelect) {
-              // Greedy: largest hour ≤ 2h, set it, then largest live minute under the cap.
+              // Greedy: largest hour ≤ cap, set it, then largest live minute under the cap.
               var bestHour = pickBestHourUnderCap(hourSelect, maxMin);
               if (!bestHour) {
                 window.__parkingZoneDurationAttempts = attempts + 1;
@@ -2567,10 +2567,10 @@ enum BookingFormPrefill {
           function zoneDurationReadyForContinue() {
             if (!hasZoneDurationSelectors()) return true;
             if (window.__parkingZoneDurationSet) return true;
-            // Soft accept when UI already shows greedy hour + max live minute under the 2h cap.
+            // Soft accept when UI already shows greedy hour + max live minute under the cap.
             var found = findZoneHourMinuteSelects();
             if (found.hourSelect && found.minuteSelect) {
-              var maxMin = cfg.maxDurationMinutes || 120;
+              var maxMin = cfg.maxDurationMinutes || 160;
               var wantH = pickBestHourUnderCap(found.hourSelect, maxMin);
               var h = readSelectedHourNumber(found.hourSelect);
               var m = readSelectedNumber(found.minuteSelect);
