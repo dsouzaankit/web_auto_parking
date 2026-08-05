@@ -2088,10 +2088,24 @@ enum BookingFormPrefill {
             if ((window.__parkingZoneApiResults || []).length) {
               window.__parkingNearestZoneFetchedAt = Date.now();
               var nearest = pickNearestZoneCandidate();
-              if (nearest) window.__parkingNearestZoneCandidate = nearest;
+              // Clear stale Atlanta/default picks when nothing is nearby.
+              window.__parkingNearestZoneCandidate = nearest || null;
               return true;
             }
             return false;
+          }
+
+          function isAcceptableZoneCandidate(candidate) {
+            if (!candidate || !candidate.internalZoneCode) return false;
+            if (!/^\\d{5,}$/.test(String(candidate.internalZoneCode))) return false;
+            var addressSearch = /\\/search\\/[^/]+/i.test(location.pathname || '');
+            var maxM = addressSearch ? ADDRESS_ZONE_MAX_METERS : NEARBY_ZONE_MAX_METERS;
+            if (typeof candidate.distanceMeters === 'number' && isFinite(candidate.distanceMeters)) {
+              return candidate.distanceMeters <= maxM;
+            }
+            // Geo mode requires a known nearby distance.
+            if (!addressSearch && cfg.lat != null && cfg.lng != null) return false;
+            return !!addressSearch;
           }
 
           /// Prefer arriving via /search Park Here. Bare /zone/start has no working self-search API.
@@ -2103,8 +2117,9 @@ enum BookingFormPrefill {
             var existing = readPrefilledZoneValue();
             if (existing) return 'ready';
             requestNearestZonesFromApi();
-            var candidate = window.__parkingNearestZoneCandidate || pickNearestZoneCandidate();
-            if (candidate && candidate.internalZoneCode && !window.__parkingNearestZoneNavigated) {
+            var candidate = pickNearestZoneCandidate();
+            window.__parkingNearestZoneCandidate = candidate || null;
+            if (isAcceptableZoneCandidate(candidate) && !window.__parkingNearestZoneNavigated) {
               window.__parkingNearestZoneNavigated = true;
               window.__parkingNearestZoneFilled = true;
               try {
@@ -2113,7 +2128,7 @@ enum BookingFormPrefill {
                 return 'navigated';
               } catch (e) {}
             }
-            if (candidate) {
+            if (isAcceptableZoneCandidate(candidate)) {
               var input = findZoneNumberInput();
               var code = String(candidate.signageCode || candidate.zoneID || '').trim();
               if (input) nudgeZoneIdNumericKeypad(input);
@@ -2132,19 +2147,38 @@ enum BookingFormPrefill {
             return 'pending';
           }
 
+          /// Reject default-map (Atlanta) / faraway picks when GPS has no local zones.
+          var NEARBY_ZONE_MAX_METERS = 2500;
+          var ADDRESS_ZONE_MAX_METERS = 8000;
+
           function pickNearestZoneCandidate() {
             var api = zoneCandidatesFromApi();
             var dom = zoneCandidatesFromDom();
-            var merged = api.length ? api : dom;
+            var addressSearch = /\\/search\\/[^/]+/i.test(location.pathname || '');
+            var maxM = addressSearch ? ADDRESS_ZONE_MAX_METERS : NEARBY_ZONE_MAX_METERS;
+            // Geo mode: API only (has coords/distance). Never fall back to undated DOM/Atlanta list.
+            var merged = api.length ? api : (addressSearch ? dom : []);
             if (!merged.length) return null;
-            var withDist = merged.filter(function(z) { return typeof z.distanceMeters === 'number'; });
+            var withDist = merged.filter(function(z) {
+              return typeof z.distanceMeters === 'number' && isFinite(z.distanceMeters)
+                && z.distanceMeters >= 0 && z.distanceMeters <= maxM;
+            });
             if (withDist.length) {
               withDist.sort(function(a, b) { return a.distanceMeters - b.distanceMeters; });
               return withDist[0];
             }
-            // After geo recenter, ParkMobile lists zones nearest-first.
-            merged.sort(function(a, b) { return a.order - b.order; });
-            return merged[0];
+            // Geo + native fix: no nearby zone — caller pauses for street-address search.
+            if (!addressSearch && cfg.lat != null && cfg.lng != null) {
+              return null;
+            }
+            // After user-typed address, SPA list is for that place — first Park Here is OK.
+            if (addressSearch) {
+              var list = api.length ? api : dom;
+              if (!list.length) return null;
+              list.sort(function(a, b) { return a.order - b.order; });
+              return list[0];
+            }
+            return null;
           }
 
           function activateNearestZone(candidate) {
@@ -2578,30 +2612,50 @@ enum BookingFormPrefill {
             return false;
           }
 
+          function buttonLabelText(b) {
+            return ((b.innerText || '') + ' ' + (b.getAttribute('aria-label') || '') + ' ' + (b.value || ''))
+              .toLowerCase().replace(/\\s+/g, ' ').trim();
+          }
+
+          function hasConfirmZoneButton() {
+            var buttons = document.querySelectorAll('button, [role=\"button\"], input[type=\"submit\"], a');
+            for (var i = 0; i < buttons.length; i++) {
+              var b = buttons[i];
+              if (!visible(b) || b.disabled) continue;
+              if (buttonLabelText(b).indexOf('confirm zone') !== -1) return true;
+            }
+            return false;
+          }
+
+          /// Auto Continue only — never returns Confirm Zone (manual pause on zone-id page).
           function findZoneContinueButton() {
             var buttons = document.querySelectorAll('button, [role=\"button\"], input[type=\"submit\"], a');
-            var confirmBtn = null;
             var continueBtn = null;
             for (var i = 0; i < buttons.length; i++) {
               var b = buttons[i];
               if (!visible(b) || b.disabled) continue;
-              var t = ((b.innerText || '') + ' ' + (b.getAttribute('aria-label') || '') + ' ' + (b.value || '')).toLowerCase().replace(/\\s+/g, ' ').trim();
+              var t = buttonLabelText(b);
               if (!t) continue;
               // Never payment / Apple / purchase CTAs here.
               if (/continue with apple|apple pay|complete purchase|buy with|log in|sign up|sign in/.test(t)) continue;
               if (/save and continue|save & continue/.test(t)) continue;
-              if (t.indexOf('confirm zone') !== -1) confirmBtn = confirmBtn || b;
-              else if (t === 'continue' || t === 'confirm' || t === 'next' || t === 'proceed') continueBtn = continueBtn || b;
+              // Manual pause: user must tap Confirm Zone.
+              if (t.indexOf('confirm zone') !== -1) continue;
+              if (t === 'continue' || t === 'confirm' || t === 'next' || t === 'proceed') continueBtn = continueBtn || b;
               else if (/^continue\\b/.test(t) && t.length < 24) continueBtn = continueBtn || b;
             }
-            return confirmBtn || continueBtn;
+            return continueBtn;
           }
 
           function clickZoneContinueButton() {
             var now = Date.now();
             if (window.__parkingZoneContinueAt && (now - window.__parkingZoneContinueAt) < 2200) return false;
+            // Hard stop while Confirm Zone is on screen (map / zone-id selection pause).
+            if (hasConfirmZoneButton()) return false;
             var btn = findZoneContinueButton();
             if (!btn) return false;
+            var t = buttonLabelText(btn);
+            if (t.indexOf('confirm zone') !== -1) return false;
             // No scroll — Continue sits at the bottom; scrolling it into center fights the user every loop.
             if (!click(btn, { scroll: false })) return false;
             window.__parkingZoneContinueAt = now;
@@ -2623,16 +2677,18 @@ enum BookingFormPrefill {
             return false;
           }
 
-          /// First checkout page that asks for Zone # — prefill only; user submits Confirm Zone / Continue.
+          /// First checkout page that asks for Zone # — prefill only; user submits Confirm Zone.
           function isZoneIdEntryPage() {
             var path = location.pathname || '';
             if (/\\/zone\\/(duration|auth|vehicle|contact|payment|confirm|review|summary)/i.test(path)) {
               return false;
             }
+            // Confirm Zone CTA is the map-selection pause — always treat as zone-id entry.
+            if (hasConfirmZoneButton()) return true;
             if (hasZoneDurationSelectors()) return false;
             if (zoneCheckoutStepsVisible()) return false;
             if (/\\/zone\\/start/i.test(path)) return true;
-            if (zoneEntryFormVisible() && findZoneContinueButton()) return true;
+            if (zoneEntryFormVisible() && (findZoneNumberInput() || hasConfirmZoneButton())) return true;
             return false;
           }
 
@@ -2659,6 +2715,7 @@ enum BookingFormPrefill {
                 window.__parkingNearestZoneCandidate = null;
                 window.__parkingZoneActivated = false;
                 window.__parkingAwaitZonesLogged = false;
+                window.__parkingAwaitAddressLogged = false;
                 // Address geocode (/search/hoboken-nj-usa) replaces geo; don't keep Atlanta/stub picks.
                 if (/\\/search\\/[^/]+/i.test(searchPath)) {
                   window.__parkingDidTapGeo = true;
@@ -2687,8 +2744,26 @@ enum BookingFormPrefill {
                 return { status: 'waiting', filled: 0, action: 'awaitZones' };
               }
               requestNearestZonesFromApi();
-              var candidate = window.__parkingNearestZoneCandidate || pickNearestZoneCandidate();
-              if (!candidate) {
+              var candidate = pickNearestZoneCandidate();
+              window.__parkingNearestZoneCandidate = candidate || null;
+              if (!isAcceptableZoneCandidate(candidate)) {
+                // Geo: give SPA a few seconds, then stop — let user type a street address.
+                // Do not keep waiting until a faraway/default (Atlanta) list appears.
+                if (!addressSearch) {
+                  if (geoAge < 8000) {
+                    return { status: 'waiting', filled: 0, action: 'awaitZones' };
+                  }
+                  if (!window.__parkingAwaitAddressLogged) {
+                    window.__parkingAwaitAddressLogged = true;
+                    bridge({
+                      type: 'log',
+                      message: 'awaitAddressSearch — no zone within ' + NEARBY_ZONE_MAX_METERS
+                        + 'm of GPS; api=' + apiCount + ' dom=' + domCount
+                        + ' (type street address or Park Here manually)'
+                    });
+                  }
+                  return { status: 'filled', filled: 0, action: 'awaitAddressSearch' };
+                }
                 if (geoAge < 14000) {
                   return { status: 'waiting', filled: 0, action: 'awaitZones' };
                 }
@@ -2696,9 +2771,6 @@ enum BookingFormPrefill {
                   window.__parkingAwaitZonesLogged = true;
                   bridge({ type: 'log', message: 'awaitZones timeout api=' + apiCount + ' dom=' + domCount });
                 }
-                return { status: 'waiting', filled: 0, action: 'awaitZones' };
-              }
-              if (!candidate.internalZoneCode || !/^\\d{5,}$/.test(String(candidate.internalZoneCode))) {
                 return { status: 'waiting', filled: 0, action: 'awaitZones' };
               }
               if (activateNearestZone(candidate)) {
