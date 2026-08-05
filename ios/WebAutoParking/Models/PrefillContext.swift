@@ -10,7 +10,7 @@ struct PrefillContext: Equatable {
     var mode: Mode = .standard
     var latitude: Double?
     var longitude: Double?
-    /// Cap for zone session duration pickers (default 2h).
+    /// Cap for zone session duration pickers (Zone tab: 40 / 80 / 120).
     var maxDurationMinutes: Int = 120
     var zoneAutomationEnabled: Bool = true
 

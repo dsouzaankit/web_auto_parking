@@ -28,6 +28,29 @@ enum ReservationStartMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// Allowed Zone session caps in 40-minute steps (matches common ParkMobile minute lists).
+enum ZoneDurationOption: Int, CaseIterable, Identifiable {
+    case m40 = 40
+    case m80 = 80
+    case m120 = 120
+
+    var id: Int { rawValue }
+
+    var shortLabel: String {
+        switch self {
+        case .m40: return "40m"
+        case .m80: return "1h20"
+        case .m120: return "2h"
+        }
+    }
+
+    static func clamped(_ minutes: Int) -> Int {
+        let allowed = allCases.map(\.rawValue)
+        if allowed.contains(minutes) { return minutes }
+        return ZoneDurationOption.m120.rawValue
+    }
+}
+
 /// Global fixed-duration session length (1–6h) and reservation start mode.
 /// In-app choices override `BookingConfig.json` defaults where applicable.
 @MainActor
@@ -36,6 +59,7 @@ final class SessionPreferences: ObservableObject {
 
     private let durationKey = "sessionDurationHours.override"
     private let startModeKey = "reservationStartMode"
+    private let zoneDurationKey = "zoneMaxDurationMinutes"
 
     @Published var durationHours: Int {
         didSet {
@@ -54,6 +78,18 @@ final class SessionPreferences: ObservableObject {
         }
     }
 
+    /// Zone tab duration cap (40 / 80 / 120). Automation picks the largest available ≤ this.
+    @Published var zoneMaxDurationMinutes: Int {
+        didSet {
+            let clamped = ZoneDurationOption.clamped(zoneMaxDurationMinutes)
+            if zoneMaxDurationMinutes != clamped {
+                zoneMaxDurationMinutes = clamped
+                return
+            }
+            UserDefaults.standard.set(clamped, forKey: zoneDurationKey)
+        }
+    }
+
     private init() {
         if UserDefaults.standard.object(forKey: durationKey) != nil {
             durationHours = BookingConfig.clampDuration(
@@ -67,6 +103,13 @@ final class SessionPreferences: ObservableObject {
             startMode = mode
         } else {
             startMode = .last15
+        }
+        if UserDefaults.standard.object(forKey: zoneDurationKey) != nil {
+            zoneMaxDurationMinutes = ZoneDurationOption.clamped(
+                UserDefaults.standard.integer(forKey: zoneDurationKey)
+            )
+        } else {
+            zoneMaxDurationMinutes = ZoneDurationOption.m120.rawValue
         }
     }
 }
