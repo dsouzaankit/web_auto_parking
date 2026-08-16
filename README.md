@@ -89,6 +89,7 @@ Presets above are saved by default in that order (existing installs pick up miss
 |-----|----------|
 | **Garages** | Saved facilities → provider checkout (garage automation path) |
 | **Zone** | Opens [`app.parkmobile.io/search`](https://app.parkmobile.io/search). Segmented **Duration** (**40m / 1h20 / 2h** and **2h40**, persisted; default **2h40**). **Search Zones** → **Get user location** → nearest **Park Here** only if within ~2.5 km of GPS (won’t grab default Atlanta map zones). If nothing nearby, automation **pauses** so you can type a street address (or tap Park Here); after `/search/{place}` it resumes. Then you tap **Confirm Zone** on the zone-id page (Zone # gets `inputmode=numeric`; ABC/globe still switches — no `pattern=[0-9]*` lock) → duration ≤ chosen cap → guest → contact → vehicle → Apple Pay prep. |
+| **Z. Receipts** | Last **10** paid **Zone** (on-street) guest receipt links (`/sessions/{uuid}`). Not garage reservations. Survives Zone reset and app restart. Tap to reopen the timer (no automation). Backup: on the post-checkout timer page tap **Copy link**, then **Paste link** here. Same uuid paste is ignored (no extra row). |
 
 ### Zone flow notes
 
@@ -99,6 +100,7 @@ Presets above are saved by default in that order (existing installs pick up miss
 - Duration (greedy under the Zone **Duration** picker: **40 / 80 / 120 / 160** min, default **2h40**): pick the largest `#hours` with `h×60 ≤ max` (values may be minute-encoded, e.g. `value="60"` = **1 Hour**), set it, then pick the largest live `#minutes` with total ≤ max. Don’t score minutes before the hour is fixed — that list can refresh (20m/40m steps plus an odd leftover for the zone max).
 - If hour/minute selectors are missing, keeps tapping **Continue**.
 - Guest Zone checkout uses the same email/phone prefill as garages (including Contact **Edit** when guest checkout collapses a throwaway `pm-test` address); sessions still won’t sync into the ParkMobile app for extend (see guest note above). Zone must also allow extensions and not already be at max duration.
+- After Zone Apple Pay, `/ondemand-guest-purchase` stores the `/sessions/{uuid}` receipt link under **Z. Receipts** (last 10). If that misses, the timer page (`/sessions/{uuid}`) swaps the wand for **Copy link**; **Paste link** on Z. Receipts saves it. Pasting the same uuid again is a no-op (keeps the original row). Garage **reservations** are not saved there — those already send a confirmation-email pass. Automation does **not** keep running on `/zone/confirmation` or `/sessions/…`, so the receipt page can stay up until you restart for a fresh checkout.
 - Capture notes / expected APIs: [`ai/parkmobile_zone_xhr/README.md`](ai/parkmobile_zone_xhr/README.md).
 
 ## Build & install (no Mac)

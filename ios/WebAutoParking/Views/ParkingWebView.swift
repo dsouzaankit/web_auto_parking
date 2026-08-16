@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import WebKit
 
 struct ParkingWebView: View {
@@ -51,12 +52,22 @@ struct ParkingWebView: View {
                     Image(systemName: "arrow.clockwise")
                 }
 
-                Button {
-                    model.prefill(context: prefillContext)
-                } label: {
-                    Image(systemName: "wand.and.stars")
+                if let timerURL = ParkingSessionStore.copyableTimerURL(model.currentURL) {
+                    Button {
+                        UIPasteboard.general.string = timerURL.absoluteString
+                        AppLog.log("Copied zone receipt link \(timerURL.absoluteString)")
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                    }
+                    .accessibilityLabel("Copy receipt link")
+                } else {
+                    Button {
+                        model.prefill(context: prefillContext)
+                    } label: {
+                        Image(systemName: "wand.and.stars")
+                    }
+                    .disabled(model.webView == nil)
                 }
-                .disabled(model.webView == nil)
 
                 ShareLink(item: model.currentURL ?? url) {
                     Image(systemName: "square.and.arrow.up")
@@ -218,6 +229,7 @@ struct WebViewRepresentable: UIViewRepresentable {
                     DispatchQueue.main.async {
                         guard let self else { return }
                         self.publishNavigationState(from: view)
+                        ParkingSessionStore.shared.capture(pageURL: url)
                         let key = url?.absoluteString
                         guard let key, key != self.lastPrefillURL else { return }
                         guard BookingFormPrefill.shouldInject(for: url, trigger: .auto) else { return }
@@ -268,6 +280,12 @@ struct WebViewRepresentable: UIViewRepresentable {
                     if !req.isEmpty { detail += "\n  req: \(req)" }
                     if !res.isEmpty { detail += "\n  res: \(res)" }
                     XHRCapture.append(detail)
+                    ParkingSessionStore.shared.capture(
+                        xhrURL: url,
+                        requestBody: req,
+                        responseBody: res,
+                        pageURL: self.model.currentURL
+                    )
                 }
             }
         }
@@ -284,6 +302,11 @@ struct WebViewRepresentable: UIViewRepresentable {
             prefillWorkItem?.cancel()
             autoPrefillAttempts = 0
             lastPrefillURL = webView.url?.absoluteString
+            if ParkingSessionStore.isProtectedURL(webView.url)
+                || !BookingFormPrefill.shouldInject(for: webView.url, trigger: .auto) {
+                AppLog.log("Prefill skipped \(webView.url?.absoluteString ?? "(nil)")")
+                return
+            }
             enqueueAutoPrefill(for: webView, delay: 0.8)
         }
 

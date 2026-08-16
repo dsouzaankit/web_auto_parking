@@ -34,6 +34,9 @@ enum BookingFormPrefill {
             || host.contains("parkchirp")
         guard isParkingHost else { return false }
 
+        // Paid guest meter / confirmation — do not let automation navigate away.
+        if ParkingSessionStore.isProtectedURL(url) { return false }
+
         let path = url.path.lowercased()
         let query = (url.query ?? "").lowercased()
         let haystack = path + "?" + query

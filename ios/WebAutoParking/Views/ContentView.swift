@@ -14,6 +14,11 @@ struct ContentView: View {
                 .tabItem {
                     Label("Zone", systemImage: "mappin.and.ellipse")
                 }
+
+            ParkingSessionsView()
+                .tabItem {
+                    Label("Z. Receipts", systemImage: "receipt")
+                }
         }
     }
 }

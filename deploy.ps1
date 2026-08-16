@@ -147,7 +147,8 @@ print(f"injected {config.name} -> {member_name}; stripped {stripped} signature e
     # ASCII-only script; UTF8 no BOM avoids PowerShell/Python surprises
     $utf8NoBom = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($tmpPy, $py, $utf8NoBom)
-    & py -3.9 $tmpPy $IpaPath $ConfigPath $OutPath
+    # py -3.9 stderr is terminating under $ErrorActionPreference Stop; use default 3.x.
+    & py -3 $tmpPy $IpaPath $ConfigPath $OutPath
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to inject BookingConfig.json into IPA"
     }
