@@ -4,12 +4,17 @@
 #
 # Deploy workflow:
 #   1. Build/download IPA (gh workflow / Actions artifact)
-#   2. Run:  .\deploy.ps1
+#   2. Run:  .\deploy.ps1   (also starts AltServer + phone subnet unless -SkipAltStorePrep)
 #   3. On iPhone: AltStore -> My Apps -> + -> pick the timestamped IPA from
 #      Files -> iCloud Drive -> Downloads
 #      Or AltServer Sideload of ios\build artifacts\ipa\WebAutoParking.prepared.ipa
 #
 # Usage:  powershell -ExecutionPolicy Bypass -File .\deploy.ps1
+#         .\deploy.ps1 -SkipAltStorePrep
+
+param(
+    [switch] $SkipAltStorePrep
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -37,6 +42,20 @@ $PreparedIpa = Join-Path $ProjectRoot "ios\build artifacts\ipa\WebAutoParking.pr
 
 function Write-Step($Message) {
     Write-Host "==> $Message"
+}
+
+function Invoke-ProjectAltStoreDeployPrep {
+    if ($SkipAltStorePrep) { return }
+    $join = @(
+        (Join-Path $ProjectRoot 'env_setup\altserver_refresh_scripts\Join-AltStoreDeployPrep.ps1')
+        'P:\all_scripts\iOS apps\env_setup\altserver_refresh_scripts\Join-AltStoreDeployPrep.ps1'
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+    if (-not $join) {
+        Write-Host 'WARN: env_setup AltServer helpers not found — skip tray/subnet prep.'
+        return
+    }
+    . $join
+    Invoke-AltStoreDeployPrep
 }
 
 function Remove-ICloudIpas {
@@ -165,6 +184,7 @@ if (-not (Test-Path -LiteralPath $ICloudDownloads)) {
 Write-Host ""
 Write-Host "Deploy workflow:"
 Write-Host "  [PC]  1. This script (inject BookingConfig + copy IPA to iCloud Downloads)"
+Write-Host "  [PC]     AltServer tray + phone subnet (env_setup), unless -SkipAltStorePrep"
 Write-Host "  [YOU] 2. iPhone Files -> iCloud Drive -> Downloads -> $DestIpaName"
 Write-Host "  [YOU] 3. AltStore -> My Apps -> + -> select the IPA"
 Write-Host ""
@@ -213,3 +233,5 @@ Write-Host "Next on iPhone:"
 Write-Host "  Wait until Files shows full size (~$SizeKb KB)"
 Write-Host "  AltStore -> My Apps -> + -> $DestIpaName"
 Write-Host "  Or AltServer Sideload: $IpaToCopy"
+
+Invoke-ProjectAltStoreDeployPrep

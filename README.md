@@ -98,10 +98,19 @@ Presets above are saved by default in that order (existing installs pick up miss
 - **Confirm Zone** is always manual (automation never taps that CTA). After you submit, loops **Continue** until `https://app.parkmobile.io/zone/auth?checkoutState=…`.
 - On submit errors, waits for **manual re-submit**, then resumes the Continue loop.
 - Duration (greedy under the Zone **Duration** picker: **40 / 80 / 120 / 160** min, default **2h40**): pick the largest `#hours` with `h×60 ≤ max` (values may be minute-encoded, e.g. `value="60"` = **1 Hour**), set it, then pick the largest live `#minutes` with total ≤ max. Don’t score minutes before the hour is fixed — that list can refresh (20m/40m steps plus an odd leftover for the zone max).
+- **Hoboken after paid hours (ParkMobile quirk, zone `47922`):** weekday/Saturday paid window has stopped at **9:00 PM** (real meter $). After 9 PM the zone can stay `isParkingAllowed` with `maxStopTimeLocal` **midnight** and **parkingPrice $0** + **$0.35** service fee only — leftover duration then looks like ~2h. That is not a new billed period; greedy duration just takes whatever ParkMobile still lists under the cap.
 - If hour/minute selectors are missing, keeps tapping **Continue**.
 - Guest Zone checkout uses the same email/phone prefill as garages (including Contact **Edit** when guest checkout collapses a throwaway `pm-test` address); sessions still won’t sync into the ParkMobile app for extend (see guest note above). Zone must also allow extensions and not already be at max duration.
 - After Zone Apple Pay, `/ondemand-guest-purchase` stores the `/sessions/{uuid}` receipt link under **Z. Receipts** (last 10). If that misses, the timer page (`/sessions/{uuid}`) swaps the wand for **Copy link**; **Paste link** on Z. Receipts saves it. Pasting the same uuid again is a no-op (keeps the original row). Garage **reservations** are not saved there — those already send a confirmation-email pass. Automation does **not** keep running on `/zone/confirmation` or `/sessions/…`, so the receipt page can stay up until you restart for a fresh checkout.
 - Capture notes / expected APIs: [`ai/parkmobile_zone_xhr/README.md`](ai/parkmobile_zone_xhr/README.md).
+
+## TODO
+
+### Internal numeric parking record (`id`)
+
+- **Why:** Guest Zone receipts have no confirmation #, barcode, or `orderUuid` (null on on-demand). The public unique key is `parking_uuid` (already the `/sessions/{uuid}` link and Z. Receipts row id) but it is too long for a list. `GET /v2/parking/{uuid}` also returns integer **`id`** (e.g. `110787034` on the 10:02 PM `47922` ticket) — ParkMobile’s parking-row PK, 1:1 with that booking, not an Apple Pay txn. Shorter lookup on the receipt list.
+- **Where:** **Z. Receipts** only (not garage reservations). Source: `GET https://app.parkmobile.io/api/proxy/parkmobileapi/v2/parking/{uuid}` after pay (timer page). **Not** in `POST /ondemand-guest-purchase` (that JSON is uuid + start/stop only). Example bodies: `ai/parkmobile_zone_xhr/live_xhr.txt` (10:02 PM); `ai/logs/checkout_081526_0909p.txt` is the 8:46 PM run but has no `res:` bodies so no `id` there.
+- **How:** Parse `id` from the existing `/v2/parking/` XHR capture (uuid is already read). Store on `SavedParkingSession` (optional `Int`). Show on the row (e.g. `10:02p-12:00a . 08/15/26 . 110787034 . U13NLN`). Keep **uuid** as the unique row key (dup pastes still no-op). Fill `id` on a later v2 GET if the row was created from purchase uuid first.
 
 ## Build & install (no Mac)
 
@@ -109,7 +118,7 @@ See [ios/BUILD-WITHOUT-MAC.md](ios/BUILD-WITHOUT-MAC.md). Short path:
 
 1. Push to `master` (or **Actions → ios-build → Run workflow** — IPA only builds on `workflow_dispatch`)
 2. Download **`WebAutoParking-ipa`**
-3. Run **`.\deploy.ps1`** — injects `BookingConfig.json`, strips broken `_CodeSignature`, copies timestamped `WebAutoParking-b{build}-{timestamp}.ipa` to iCloud Downloads (removes older copies)
+3. Run **`.\deploy.ps1`** — injects `BookingConfig.json`, strips broken `_CodeSignature`, copies timestamped `WebAutoParking-b{build}-{timestamp}.ipa` to iCloud Downloads (removes older copies). Also starts **AltServer** (tray) and checks the phone vs PC subnet via `env_setup\altserver_refresh_scripts` (`-SkipAltStorePrep` to skip).
 4. Install via **AltStore → My Apps → +**. **incorrect/invalid format** is often benign (iCloud still syncing or a flaky handoff) — ignore it if Parking appears under My Apps and launches. Only force-quit/reopen, wait for full IPA size, or **AltServer Sideload** if it never installs.
 
 CI ships the example config; personal installs need step 3 (or the IPA will prefill placeholders).

@@ -25,14 +25,28 @@ struct SavedParkingSession: Codable, Identifiable, Equatable, Hashable {
 
     var subtitle: String {
         var parts: [String] = []
-        if let plate, !plate.isEmpty { parts.append(plate) }
         if let startLabel, let stopLabel, !startLabel.isEmpty {
-            parts.append("\(startLabel)–\(stopLabel)")
+            parts.append("\(Self.compactClock(startLabel))-\(Self.compactClock(stopLabel))")
         } else if let amount, !amount.isEmpty {
             parts.append(amount)
         }
-        parts.append(capturedAt.formatted(date: .abbreviated, time: .shortened))
-        return parts.joined(separator: " · ")
+        parts.append(Self.compactTimestamp(capturedAt))
+        if let plate, !plate.isEmpty { parts.append(plate) }
+        return parts.joined(separator: " . ")
+    }
+
+    private static func compactClock(_ text: String) -> String {
+        text.replacingOccurrences(of: " AM", with: "a")
+            .replacingOccurrences(of: " PM", with: "p")
+            .replacingOccurrences(of: " am", with: "a")
+            .replacingOccurrences(of: " pm", with: "p")
+    }
+
+    private static func compactTimestamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MM/dd/yy"
+        return formatter.string(from: date)
     }
 }
 
@@ -264,7 +278,9 @@ final class ParkingSessionStore: ObservableObject {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: offsetMinutes * 60)
-        formatter.dateFormat = "h:mm a"
+        formatter.dateFormat = "h:mma"
+        formatter.amSymbol = "a"
+        formatter.pmSymbol = "p"
         return formatter.string(from: date)
     }
 }
