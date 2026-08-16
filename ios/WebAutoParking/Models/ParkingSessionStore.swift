@@ -53,7 +53,7 @@ final class ParkingSessionStore: ObservableObject {
         load()
     }
 
-    static func isProtectedURL(_ url: URL?) -> Bool {
+    nonisolated static func isProtectedURL(_ url: URL?) -> Bool {
         guard let path = url?.path.lowercased() else { return false }
         return path.contains("/sessions/")
             || path.contains("/zone/confirmation")
@@ -62,7 +62,7 @@ final class ParkingSessionStore: ObservableObject {
     }
 
     /// Canonical `/sessions/{uuid}` link when the WebView is on the post-checkout timer page.
-    static func copyableTimerURL(_ url: URL?) -> URL? {
+    nonisolated static func copyableTimerURL(_ url: URL?) -> URL? {
         guard let url, let uuid = uuid(in: url) else { return nil }
         return URL(string: "https://app.parkmobile.io/sessions/\(uuid.lowercased())")
     }
@@ -217,11 +217,11 @@ final class ParkingSessionStore: ObservableObject {
         return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
 
-    private static func uuid(in url: URL) -> String? {
+    nonisolated private static func uuid(in url: URL) -> String? {
         uuid(in: url.absoluteString)
     }
 
-    private static func uuid(in text: String) -> String? {
+    nonisolated private static func uuid(in text: String) -> String? {
         let pattern = #"(?:/sessions/|parking_uuid"?\s*[:=]\s*"?)([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
