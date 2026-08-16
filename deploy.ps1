@@ -11,9 +11,11 @@
 #
 # Usage:  powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 #         .\deploy.ps1 -SkipAltStorePrep
+# Direct run waits for Enter (including on errors). Child callers: -NoWaitEnter.
 
 param(
-    [switch] $SkipAltStorePrep
+    [switch] $SkipAltStorePrep,
+    [switch] $NoWaitEnter
 )
 
 $ErrorActionPreference = "Stop"
@@ -40,6 +42,31 @@ $DestIpaName = "WebAutoParking-b$BuildNumber-$Timestamp.ipa"
 $DestIpa = Join-Path $ICloudDownloads $DestIpaName
 $PreparedIpa = Join-Path $ProjectRoot "ios\build artifacts\ipa\WebAutoParking.prepared.ipa"
 
+function Wait-EnterToClose {
+    if ($NoWaitEnter) { return }
+    Write-Host ""
+    Write-Host 'Press Enter to close...' -ForegroundColor Yellow
+    try {
+        [void][Console]::ReadLine()
+    } catch {
+        Read-Host | Out-Null
+    }
+}
+
+function Exit-WithEnter {
+    param([int] $ExitCode = 0)
+    Wait-EnterToClose
+    exit $ExitCode
+}
+
+trap {
+    Write-Host ""
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    if ($NoWaitEnter) { throw $_ }
+    Wait-EnterToClose
+    exit 1
+}
+
 function Write-Step($Message) {
     Write-Host "==> $Message"
 }
@@ -54,8 +81,16 @@ function Invoke-ProjectAltStoreDeployPrep {
         Write-Host 'WARN: env_setup AltServer helpers not found — skip tray/subnet prep.'
         return
     }
-    . $join
-    Invoke-AltStoreDeployPrep
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        . $join
+        Invoke-AltStoreDeployPrep
+    } catch {
+        Write-Warning ("AltStore deploy prep failed (IPA copy already done): {0}" -f $_.Exception.Message)
+    } finally {
+        $ErrorActionPreference = $prev
+    }
 }
 
 function Remove-ICloudIpas {
@@ -235,3 +270,4 @@ Write-Host "  AltStore -> My Apps -> + -> $DestIpaName"
 Write-Host "  Or AltServer Sideload: $IpaToCopy"
 
 Invoke-ProjectAltStoreDeployPrep
+Exit-WithEnter 0
