@@ -4,7 +4,7 @@
 #
 # Deploy workflow:
 #   1. Build/download IPA (gh workflow / Actions artifact)
-#   2. Run:  .\deploy.ps1   (also starts AltServer + phone subnet unless -SkipAltStorePrep)
+#   2. Run:  .\deploy.ps1   (also starts AltServer unless -SkipAltStorePrep; phone subnet is USB plug-in)
 #   3. On iPhone: AltStore -> My Apps -> + -> pick the timestamped IPA from
 #      Files -> iCloud Drive -> Downloads
 #      Or AltServer Sideload of ios\build artifacts\ipa\WebAutoParking.prepared.ipa
@@ -78,14 +78,14 @@ function Invoke-ProjectAltStoreDeployPrep {
         'P:\all_scripts\iOS apps\env_setup\altserver_refresh_scripts\Join-AltStoreDeployPrep.ps1'
     ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
     if (-not $join) {
-        Write-Host 'WARN: env_setup AltServer helpers not found — skip tray/subnet prep.'
+        Write-Host 'WARN: env_setup AltServer helpers not found — skip tray prep.'
         return
     }
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
         . $join
-        Invoke-AltStoreDeployPrep
+        Invoke-AltStoreDeployPrep -SkipPhoneSubnet
     } catch {
         Write-Warning ("AltStore deploy prep failed (IPA copy already done): {0}" -f $_.Exception.Message)
     } finally {
@@ -219,7 +219,7 @@ if (-not (Test-Path -LiteralPath $ICloudDownloads)) {
 Write-Host ""
 Write-Host "Deploy workflow:"
 Write-Host "  [PC]  1. This script (inject BookingConfig + copy IPA to iCloud Downloads)"
-Write-Host "  [PC]     AltServer tray + phone subnet (env_setup), unless -SkipAltStorePrep"
+Write-Host "  [PC]     AltServer tray (env_setup); phone subnet is USB plug-in. -SkipAltStorePrep to skip tray"
 Write-Host "  [YOU] 2. iPhone Files -> iCloud Drive -> Downloads -> $DestIpaName"
 Write-Host "  [YOU] 3. AltStore -> My Apps -> + -> select the IPA"
 Write-Host ""
