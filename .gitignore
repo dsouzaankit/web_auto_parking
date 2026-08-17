@@ -12,3 +12,6 @@ ios/WebAutoParking/Resources/BookingConfig.json
 
 # Device crash reports pulled via pymobiledevice3
 crashlogs/
+
+# Local research / live XHR pulls / chat dumps
+ai/
