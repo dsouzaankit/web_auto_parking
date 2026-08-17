@@ -118,7 +118,7 @@ See [ios/BUILD-WITHOUT-MAC.md](ios/BUILD-WITHOUT-MAC.md). Short path:
 
 1. Push to `master` (or **Actions → ios-build → Run workflow** — IPA only builds on `workflow_dispatch`)
 2. Download **`WebAutoParking-ipa`**
-3. Run **`.\deploy.ps1`** — injects `BookingConfig.json`, strips broken `_CodeSignature`, copies timestamped `WebAutoParking-b{build}-{timestamp}.ipa` to iCloud Downloads (removes older copies). Also starts **AltServer** (tray) via `env_setup\altserver_refresh_scripts` (`-SkipAltStorePrep` to skip). Phone-subnet check stays on **USB plug-in**.
+3. Run **`.\deploy.ps1`** — injects `BookingConfig.json`, strips broken `_CodeSignature`, copies timestamped `WebAutoParking-b{build}-{timestamp}.ipa` to iCloud Downloads (removes older copies). Also starts **AltServer** (tray) via `env_setup\altserver_refresh` (`-SkipAltStorePrep` to skip). Phone-subnet check stays on **USB plug-in**.
 4. Install via **AltStore → My Apps → +**. **incorrect/invalid format** is often benign (iCloud still syncing or a flaky handoff) — ignore it if Parking appears under My Apps and launches. Only force-quit/reopen, wait for full IPA size, or **AltServer Sideload** if it never installs.
 
 CI ships the example config; personal installs need step 3 (or the IPA will prefill placeholders).
