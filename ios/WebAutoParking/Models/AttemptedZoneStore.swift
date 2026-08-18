@@ -167,14 +167,13 @@ final class AttemptedZoneStore: ObservableObject {
     }
 
     private func migrateLegacySingleZone() {
-        let internal = stored(legacyInternalKey)
-        guard let internal else { return }
+        guard let legacyInternal = stored(legacyInternalKey) else { return }
         let signage = stored(legacySignageKey)
         attempts = [
-            AttemptedZone(internalCode: internal, signageCode: signage, attemptedAt: Date())
+            AttemptedZone(internalCode: legacyInternal, signageCode: signage, attemptedAt: Date())
         ]
         persist()
-        AppLog.log("Attempted zone migrated internal=\(internal) signage=\(signage ?? "-")")
+        AppLog.log("Attempted zone migrated internal=\(legacyInternal) signage=\(signage ?? "-")")
     }
 
     private func persist() {
