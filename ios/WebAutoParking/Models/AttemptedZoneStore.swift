@@ -34,6 +34,8 @@ struct AttemptedZone: Codable, Identifiable, Equatable, Hashable {
 final class AttemptedZoneStore: ObservableObject {
     static let shared = AttemptedZoneStore()
     static let maxAttempts = 3
+    /// ParkMobile internals are vendor+zone (e.g. `30447039`, `1081972`). A public Zone # like `47922` is not an internal.
+    private static let minInternalDigits = 7
 
     @Published private(set) var attempts: [AttemptedZone] = []
 
@@ -48,6 +50,7 @@ final class AttemptedZoneStore: ObservableObject {
     func remember(pageURL: URL?) {
         guard let pageURL else { return }
         let path = pageURL.path.lowercased()
+        if Self.shouldIgnore(path) { return }
         if let code = queryValue("internalzonecode", in: pageURL) {
             upsert(internalCode: code, signageCode: nil)
         }
@@ -60,28 +63,30 @@ final class AttemptedZoneStore: ObservableObject {
 
     func remember(xhrURL: String, responseBody: String) {
         let lower = xhrURL.lowercased()
-        if let code = firstMatch(#"internalzonecode=(\d{5,})"#, in: lower) {
+        if Self.shouldIgnore(lower) { return }
+        if let code = firstMatch(#"internalzonecode=(\d{7,})"#, in: lower) {
             upsert(internalCode: code, signageCode: nil)
         }
-        if let code = firstMatch(#"/zoneoptions/(\d{5,})"#, in: lower) {
+        if let code = firstMatch(#"/zoneoptions/(\d{7,})"#, in: lower) {
             upsert(internalCode: code, signageCode: nil)
         }
-        if let code = firstMatch(#"/api/zones/(\d{5,})"#, in: lower),
-           !lower.contains("/zones/search") {
-            if code.count >= 7 {
-                upsert(internalCode: code, signageCode: nil)
-            } else {
-                attachSignage(code)
-            }
+        if let code = firstMatch(#"/api/zones/(\d{4,})"#, in: lower) {
+            rememberPathCode(code)
         }
         if let code = firstMatch(#"parkmobileapi/zones/(\d{4,})"#, in: lower) {
-            if code.count >= 7 {
-                upsert(internalCode: code, signageCode: nil)
-            } else {
-                attachSignage(code)
-            }
+            rememberPathCode(code)
         }
         rememberJSON(responseBody)
+    }
+
+    private static func shouldIgnore(_ lower: String) -> Bool {
+        lower.contains("/zones/search")
+            || lower.contains("/search/transient")
+            || lower.contains("/sessions/")
+            || lower.contains("/v2/parking")
+            || lower.contains("ondemand-guest-purchase")
+            || lower.contains("/zone/confirmation")
+            || lower.contains("/zone/receipt")
     }
 
     func remove(id: String) {
@@ -91,33 +96,33 @@ final class AttemptedZoneStore: ObservableObject {
 
     private func rememberJSON(_ text: String) {
         guard let data = text.data(using: .utf8),
-              let root = try? JSONSerialization.jsonObject(with: data)
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return }
-        var objects: [[String: Any]] = []
-        if let obj = root as? [String: Any] {
-            objects.append(obj)
-            if let zones = obj["zones"] as? [[String: Any]] {
-                objects.append(contentsOf: zones)
-            }
+        // Do not walk `zones: []` (map search lists Atlanta/Austin defaults as attempts).
+        let internalCode = stringValue(root["internalZoneCode"]) ?? stringValue(root["internal_zone_code"])
+        let signage = stringValue(root["signageCode"]) ?? stringValue(root["signage_code"])
+            ?? stringValue(root["zoneCode"])
+        if let internalCode {
+            upsert(internalCode: internalCode, signageCode: signage)
+        } else if let signage {
+            attachSignage(signage)
         }
-        for obj in objects {
-            let internalCode = stringValue(obj["internalZoneCode"]) ?? stringValue(obj["internal_zone_code"])
-            let signage = stringValue(obj["signageCode"]) ?? stringValue(obj["signage_code"])
-                ?? stringValue(obj["zoneCode"])
-            if let internalCode {
-                upsert(internalCode: internalCode, signageCode: signage)
-            } else if let signage {
-                attachSignage(signage)
-            }
+    }
+
+    private func rememberPathCode(_ code: String) {
+        if code.count >= Self.minInternalDigits {
+            upsert(internalCode: code, signageCode: nil)
+        } else {
+            attachSignage(code)
         }
     }
 
     private func upsert(internalCode raw: String, signageCode: String?) {
         let code = digits(raw)
-        guard code.count >= 5 else { return }
+        guard code.count >= Self.minInternalDigits else { return }
         let signage = signageCode.flatMap { value -> String? in
             let cleaned = digits(value)
-            return cleaned.count >= 4 ? cleaned : nil
+            return (4...6).contains(cleaned.count) ? cleaned : nil
         }
 
         if let index = attempts.firstIndex(where: { $0.internalCode == code }) {
@@ -149,15 +154,16 @@ final class AttemptedZoneStore: ObservableObject {
 
     private func attachSignage(_ raw: String) {
         let code = digits(raw)
-        guard code.count >= 4, let latest = attempts.first else { return }
+        guard (4...6).contains(code.count), let latest = attempts.first else { return }
         upsert(internalCode: latest.internalCode, signageCode: code)
     }
 
     private func load() {
         if let data = UserDefaults.standard.data(forKey: storageKey),
            let decoded = try? JSONDecoder().decode([AttemptedZone].self, from: data) {
-            attempts = Array(decoded.prefix(Self.maxAttempts))
-            if attempts.count < decoded.count {
+            let usable = decoded.filter { $0.internalCode.filter(\.isNumber).count >= Self.minInternalDigits }
+            attempts = Array(usable.prefix(Self.maxAttempts))
+            if attempts != decoded {
                 persist()
             }
         }
@@ -167,7 +173,9 @@ final class AttemptedZoneStore: ObservableObject {
     }
 
     private func migrateLegacySingleZone() {
-        guard let legacyInternal = stored(legacyInternalKey) else { return }
+        guard let legacyInternal = stored(legacyInternalKey),
+              digits(legacyInternal).count >= Self.minInternalDigits
+        else { return }
         let signage = stored(legacySignageKey)
         attempts = [
             AttemptedZone(internalCode: legacyInternal, signageCode: signage, attemptedAt: Date())

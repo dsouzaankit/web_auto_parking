@@ -11,9 +11,11 @@ Same approach as [`ios_3d_loop_segments`](../../ios_3d_loop_segments/ios/BUILD-W
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\deploy.ps1
+# paste-only (same iCloud step):
+.\copy-to-icloud.ps1
 ```
 
-That copies a timestamped `WebAutoParking-b{build}-{yyyyMMdd-HHmmss}.ipa` to `%USERPROFILE%\iCloudDrive\Downloads` (or `C:\Users\dsouzaankit\iCloudDrive\Downloads` when present), injects local `BookingConfig.json`, strips `_CodeSignature` so AltStore can re-sign, and removes older `WebAutoParking*.ipa` copies.
+`deploy.ps1` reuses `copy-to-icloud.ps1` (same split as Loop Segments). That helper injects local `BookingConfig.json`, strips `_CodeSignature` so AltStore can re-sign, prunes older `WebAutoParking*.ipa` in iCloud Downloads, then copies a timestamped `WebAutoParking-b{build}-{yyyyMMdd-HHmmss}.ipa` to `%USERPROFILE%\iCloudDrive\Downloads` (or `C:\Users\dsouzaankit\iCloudDrive\Downloads` when present).
 
 Optional signed builds: set secrets `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`. Without them the IPA is unsigned and AltStore re-signs with your Apple ID.
 

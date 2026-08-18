@@ -184,7 +184,7 @@ final class ParkingSessionStore: ObservableObject {
             uuid: key,
             urlString: link.absoluteString,
             capturedAt: Date(),
-            zoneCode: zone,
+            zoneCode: Self.preferredZoneCode(incoming: zone, existing: nil),
             plate: plate,
             startLabel: startLabel,
             stopLabel: stopLabel,
@@ -193,8 +193,8 @@ final class ParkingSessionStore: ObservableObject {
 
         if let existing = sessions.first(where: { $0.id == key }) {
             session.capturedAt = existing.capturedAt
-            session.zoneCode = session.zoneCode ?? existing.zoneCode
-            session.plate = session.plate ?? existing.plate
+            session.zoneCode = Self.preferredZoneCode(incoming: session.zoneCode, existing: existing.zoneCode)
+            session.plate = existing.plate ?? session.plate
             session.startLabel = session.startLabel ?? existing.startLabel
             session.stopLabel = session.stopLabel ?? existing.stopLabel
             session.amount = session.amount ?? existing.amount
@@ -221,6 +221,26 @@ final class ParkingSessionStore: ObservableObject {
                 persist()
             }
         }
+    }
+
+    /// Public Zone # is 4–6 digits (e.g. `47922`). Do not replace it with a later vendor+zone cart code (`95347922`).
+    private static func preferredZoneCode(incoming: String?, existing: String?) -> String? {
+        func normalized(_ raw: String?) -> String? {
+            guard let raw else { return nil }
+            let digits = raw.filter(\.isNumber)
+            if digits.isEmpty { return nil }
+            if digits.hasPrefix("304"), digits.count >= 8 {
+                let rest = String(digits.dropFirst(3))
+                if (4...6).contains(rest.count) { return rest }
+            }
+            return digits
+        }
+        let incomingNorm = normalized(incoming)
+        let existingNorm = normalized(existing)
+        let isSignage: (String) -> Bool = { (4...6).contains($0.count) }
+        if let existingNorm, isSignage(existingNorm) { return existingNorm }
+        if let incomingNorm, isSignage(incomingNorm) { return incomingNorm }
+        return existingNorm ?? incomingNorm
     }
 
     private func persist() {

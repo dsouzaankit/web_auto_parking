@@ -230,7 +230,9 @@ struct WebViewRepresentable: UIViewRepresentable {
                         guard let self else { return }
                         self.publishNavigationState(from: view)
                         ParkingSessionStore.shared.capture(pageURL: url)
-                        AttemptedZoneStore.shared.remember(pageURL: url)
+                        if !ParkingSessionStore.isProtectedURL(url) {
+                            AttemptedZoneStore.shared.remember(pageURL: url)
+                        }
                         let key = url?.absoluteString
                         guard let key, key != self.lastPrefillURL else { return }
                         guard BookingFormPrefill.shouldInject(for: url, trigger: .auto) else { return }
@@ -287,7 +289,9 @@ struct WebViewRepresentable: UIViewRepresentable {
                         responseBody: res,
                         pageURL: self.model.currentURL
                     )
-                    AttemptedZoneStore.shared.remember(xhrURL: url, responseBody: res)
+                    if !ParkingSessionStore.isProtectedURL(self.model.currentURL) {
+                        AttemptedZoneStore.shared.remember(xhrURL: url, responseBody: res)
+                    }
                 }
             }
         }
