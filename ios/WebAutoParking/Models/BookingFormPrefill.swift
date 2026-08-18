@@ -975,21 +975,18 @@ enum BookingFormPrefill {
             return true;
           }
 
-          /// Garage checkout: after fields look ready (or state controls never appear), force Continue.
+          /// Garage checkout: plate match is enough after a short wait (React often leaves country/state flaky).
           function clickGarageVehicleContinueAggressive() {
             if (!isGarageCheckoutVehicleStep()) return false;
             var now = Date.now();
             if (window.__parkingLastSaveAt && (now - window.__parkingLastSaveAt) < 2200) return false;
-            if (!vehiclePlateMatches()) return false;
-            var ready = vehicleFormReady();
-            if (!ready) {
-              // Only escalate once we've waited long enough for country/state to mount.
-              var waitedState = window.__parkingVehicleStateWaitAt
-                && (now - window.__parkingVehicleStateWaitAt) >= 5000;
-              var waitedCountry = window.__parkingVehicleCountryWaitAt
-                && (now - window.__parkingVehicleCountryWaitAt) >= 5000;
-              if (!waitedState && !waitedCountry) return false;
+            if (!vehiclePlateMatches()) {
+              window.__parkingGarageVehiclePlateAt = 0;
+              return false;
             }
+            if (!window.__parkingGarageVehiclePlateAt) window.__parkingGarageVehiclePlateAt = now;
+            var ready = vehicleFormReady();
+            if (!ready && (now - window.__parkingGarageVehiclePlateAt) < 5000) return false;
             var plate = vehiclePlateInput();
             nudgeVehicleFormValidation(plate);
             var btn = findParkMobileVehicleContinueButton();
@@ -1369,29 +1366,47 @@ enum BookingFormPrefill {
             } catch (e) { return false; }
           }
 
+          function paymentDetailsCard() {
+            return firstVisible(
+              '[data-pmtest-id=\"guest-payment-step-card\"], [data-pmtest-id=\"user-payment-step-card\"], ' +
+              '[data-pmtest-id*=\"payment-step\"], [data-testid*=\"PaymentDetails\"], [data-testid*=\"payment-step\"]'
+            );
+          }
+
+          function paymentDetailsVisible() {
+            if (paymentDetailsCard()) return true;
+            var t = norm(document.body ? String(document.body.innerText || '').slice(0, 2500) : '');
+            return t.indexOf('paymentdetails') !== -1 && /applepay|continuewith/.test(t);
+          }
+
+          function isApplePayContinueCandidate(el) {
+            if (!el || isNativeApplePayBuyButton(el)) return false;
+            var pm = (el.getAttribute('data-pmtest-id') || '').toLowerCase();
+            if (pm === 'complete-purchase-button' || pm === 'apple-login-button') return false;
+            var t = textOf(el);
+            var html = norm(el.innerHTML || '');
+            if (/signinwithapple/.test(t)) return false;
+            if (/continuewithapplepay/.test(t)) return true;
+            if (/continuewith/.test(t) && /applepay/.test(html) && !/continuewithapple$/.test(t)) return true;
+            if (/^continuewith$/.test(t) && /applepay/.test(html)) return true;
+            if (pm.indexOf('apple-pay') !== -1 && pm.indexOf('continue') !== -1) return true;
+            return false;
+          }
+
           function findContinueWithApplePayButton() {
             if (!wantsApplePay()) return null;
-            // Only Payment Details — never login \"Continue with Apple\" / Sign in with Apple.
-            var payCard = document.querySelector(
-              '[data-pmtest-id=\"guest-payment-step-card\"], [data-pmtest-id=\"user-payment-step-card\"]'
-            );
-            if (!payCard || !visible(payCard)) return null;
-
-            var nodes = payCard.querySelectorAll('button, a, [role=\"button\"]');
-            for (var i = 0; i < nodes.length; i++) {
-              var el = nodes[i];
-              if (!visible(el) || el.disabled) continue;
-              if (isNativeApplePayBuyButton(el)) continue;
-              if (el.getAttribute('data-pmtest-id') === 'complete-purchase-button') continue;
-              if (el.getAttribute('data-pmtest-id') === 'apple-login-button') continue;
-              var t = textOf(el);
-              var html = norm(el.innerHTML || '');
-              // Must be Apple *Pay*. \"continuewithapple\" alone is Sign in with Apple.
-              if (/signinwithapple/.test(t)) continue;
-              if (/continuewithapplepay/.test(t)) return el;
-              if (/continuewith/.test(t) && /applepay/.test(html) && !/continuewithapple$/.test(t)) return el;
-              // Payment card: \"Continue with\" + Apple Pay glyph (text may be only \"Continue with\").
-              if (/^continuewith$/.test(t) && /applepay/.test(html)) return el;
+            // Payment Details only — never login \"Continue with Apple\" / Sign in with Apple.
+            var scopes = [];
+            var card = paymentDetailsCard();
+            if (card) scopes.push(card);
+            scopes.push(document);
+            for (var s = 0; s < scopes.length; s++) {
+              var nodes = scopes[s].querySelectorAll('button, a, [role=\"button\"]');
+              for (var i = 0; i < nodes.length; i++) {
+                var el = nodes[i];
+                if (!visible(el)) continue;
+                if (isApplePayContinueCandidate(el)) return el;
+              }
             }
             return null;
           }
@@ -1402,9 +1417,33 @@ enum BookingFormPrefill {
             if (!contactReadyForPayment()) return false;
             var btn = findContinueWithApplePayButton();
             if (!btn) return false;
-            if (!click(btn, { scroll: false })) return false;
+            var ariaDisabled = btn.getAttribute('aria-disabled') === 'true';
+            if (btn.disabled || ariaDisabled) {
+              if (!forceClickDisabled(btn)) return false;
+              bridge({ type: 'log', message: 'Continue with Apple Pay forced' });
+            } else if (!click(btn, { scroll: false })) {
+              return false;
+            } else {
+              bridge({ type: 'log', message: 'Continue with Apple Pay tapped' });
+            }
             window.__parkingApplePayAt = now;
             return true;
+          }
+
+          function logPaymentDiagnostics() {
+            if (!paymentDetailsVisible() && !findContinueWithApplePayButton()) return;
+            var now = Date.now();
+            if (window.__parkingPaymentDiagAt && (now - window.__parkingPaymentDiagAt) < 8000) return;
+            window.__parkingPaymentDiagAt = now;
+            var card = paymentDetailsCard();
+            var btn = findContinueWithApplePayButton();
+            bridge({
+              type: 'log',
+              message: 'paymentDiag card=' + (card ? (((card.getAttribute('data-pmtest-id') || card.getAttribute('data-testid') || card.tagName) || '').slice(0, 48)) : 'none')
+                + ' btn=' + (btn ? ((btn.innerText || '').trim().slice(0, 28) + (btn.disabled ? ':disabled' : '')) : 'missing')
+                + ' ready=' + contactReadyForPayment()
+                + ' shownEmail=' + (displayedContactEmail() || 'none')
+            });
           }
 
           function isCheckedControl(el) {
@@ -1502,6 +1541,7 @@ enum BookingFormPrefill {
             var onPM = /parkmobile\\.io/i.test(location.hostname || '');
             if (!onPM) return false;
             if (wantsApplePay() && findContinueWithApplePayButton()) return true;
+            if (wantsApplePay() && paymentDetailsVisible() && !window.__parkingApplePayAt) return true;
             if (acknowledgeNeedsCheck()) return true;
             return false;
           }
@@ -3214,6 +3254,7 @@ enum BookingFormPrefill {
                 logVehicleFormDiagnostics();
               }
               if (isParkMobileCheckoutFlow()) logContactDiagnostics();
+              if (isParkMobileCheckoutFlow()) logPaymentDiagnostics();
               if (clickSpotHeroVehicleConfirm()) action = action || 'vehicleConfirm';
               // Garage Vehicle Details uses Save & Continue — tap that before bare Continue.
               if (clickSaveAndContinue()
@@ -3241,13 +3282,15 @@ enum BookingFormPrefill {
               }
               if (filled > 0) {
                 // Keep going if more checkout steps still need input.
-                if (contactSectionNeedsInput() || vehicleSectionNeedsInput() || paymentSectionNeedsAction()) {
+                if (contactSectionNeedsInput() || vehicleSectionNeedsInput()
+                    || paymentSectionNeedsAction()
+                    || (paymentDetailsVisible() && !window.__parkingApplePayAt)) {
                   return { status: 'waiting', filled: filled, action: 'partial' };
                 }
                 return { status: 'filled', filled: filled, action: 'done' };
               }
-              if (paymentSectionNeedsAction()) {
-                return { status: 'waiting', filled: 0, action: 'paymentPending' };
+              if (paymentSectionNeedsAction() || (paymentDetailsVisible() && !window.__parkingApplePayAt)) {
+                return { status: 'waiting', filled: filled, action: 'paymentPending' };
               }
               // After Apple Pay / acknowledge (no field fills this pass), stop if nothing left.
               if ((window.__parkingApplePayAt || window.__parkingAckAt)
