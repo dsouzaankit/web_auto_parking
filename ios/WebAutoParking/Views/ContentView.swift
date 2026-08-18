@@ -17,7 +17,7 @@ struct ContentView: View {
 
             ParkingSessionsView()
                 .tabItem {
-                    Label("Z. Receipts", systemImage: "receipt")
+                    Label("Z. History", systemImage: "clock.arrow.circlepath")
                 }
         }
     }

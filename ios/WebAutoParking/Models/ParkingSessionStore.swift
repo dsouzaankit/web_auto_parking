@@ -50,11 +50,11 @@ struct SavedParkingSession: Codable, Identifiable, Equatable, Hashable {
     }
 }
 
-/// Last 10 paid zone sessions, persisted across app restarts.
+/// Last 7 paid zone sessions, persisted across app restarts.
 @MainActor
 final class ParkingSessionStore: ObservableObject {
     static let shared = ParkingSessionStore()
-    static let maxSessions = 10
+    static let maxSessions = 7
 
     @Published private(set) var sessions: [SavedParkingSession] = []
 
@@ -216,7 +216,10 @@ final class ParkingSessionStore: ObservableObject {
     private func load() {
         if let data = UserDefaults.standard.data(forKey: storageKey),
            let decoded = try? JSONDecoder().decode([SavedParkingSession].self, from: data) {
-            sessions = decoded
+            sessions = Array(decoded.prefix(Self.maxSessions))
+            if sessions.count < decoded.count {
+                persist()
+            }
         }
     }
 
