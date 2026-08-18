@@ -192,6 +192,13 @@ enum FixedDurationURLs {
     /// Zone parking entry (ParkMobile Zone tab). Site prefills nearest zone via geolocation.
     static let zoneStart = URL(string: "https://app.parkmobile.io/zone/start")!
 
+    static func zoneStart(internalZoneCode: String) -> URL {
+        let trimmed = internalZoneCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        var components = URLComponents(string: "https://app.parkmobile.io/zone/start")!
+        components.queryItems = [URLQueryItem(name: "internalZoneCode", value: trimmed)]
+        return components.url ?? zoneStart
+    }
+
     static func reservation(
         id: String,
         start: Date? = nil,

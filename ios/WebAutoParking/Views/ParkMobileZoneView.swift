@@ -8,6 +8,8 @@ struct ParkMobileZoneView: View {
     @State private var zoneMaxDurationMinutes = SessionPreferences.shared.zoneMaxDurationMinutes
     @State private var locationReady = false
     @State private var statusText = "Getting location…"
+    /// Opt-in jump to last attempted Zone # (Duration bar). Default stays `/search`.
+    @State private var useCachedZone = false
 
     private var prefillContext: PrefillContext {
         PrefillContext(
@@ -19,16 +21,20 @@ struct ParkMobileZoneView: View {
         )
     }
 
+    private var zoneEntryURL: URL {
+        useCachedZone ? LastAttemptedZone.startURL : FixedDurationURLs.search
+    }
+
     var body: some View {
         NavigationStack {
             Group {
                 if locationReady {
                     ParkingWebView(
                         title: "ParkMobile Zone",
-                        url: FixedDurationURLs.search,
+                        url: zoneEntryURL,
                         prefillContext: prefillContext
                     )
-                    .id("zone-parking-webview")
+                    .id(useCachedZone ? "zone-\(LastAttemptedZone.internalCode ?? "cached")" : "zone-parking-webview")
                 } else {
                     VStack(spacing: 12) {
                         ProgressView()
@@ -42,11 +48,19 @@ struct ParkMobileZoneView: View {
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
-                ZoneDurationPickerBar(minutes: $zoneMaxDurationMinutes)
+                ZoneDurationPickerBar(
+                    minutes: $zoneMaxDurationMinutes,
+                    useCachedZone: $useCachedZone
+                )
             }
             .task {
                 statusText = "Waiting for location permission…"
                 location.requestWhenInUseIfNeeded()
+                if let last = LastAttemptedZone.internalCode {
+                    AppLog.log(
+                        "Zone tab last zone internal=\(last) signage=\(LastAttemptedZone.signageCode ?? "-")"
+                    )
+                }
                 if let coord = await location.currentCoordinate(timeoutSeconds: 12) {
                     statusText = String(
                         format: "Location ready (%.4f, %.4f)",
@@ -78,13 +92,30 @@ struct ParkMobileZoneView: View {
 /// Owns SessionPreferences observation so picker churn cannot remount the Zone WKWebView.
 private struct ZoneDurationPickerBar: View {
     @Binding var minutes: Int
+    @Binding var useCachedZone: Bool
     @ObservedObject private var sessionPrefs = SessionPreferences.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Duration")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline) {
+                Text("Duration")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let label = LastAttemptedZone.displayLabel, LastAttemptedZone.internalCode != nil {
+                    if useCachedZone {
+                        Button("Search") {
+                            useCachedZone = false
+                        }
+                        .font(.caption)
+                    } else {
+                        Button("Zone \(label)") {
+                            useCachedZone = true
+                        }
+                        .font(.caption)
+                    }
+                }
+            }
             Picker("Duration", selection: $sessionPrefs.zoneMaxDurationMinutes) {
                 ForEach(ZoneDurationOption.allCases) { option in
                     Text(option.shortLabel).tag(option.rawValue)
