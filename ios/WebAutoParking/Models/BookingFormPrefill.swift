@@ -1367,22 +1367,40 @@ enum BookingFormPrefill {
           }
 
           function paymentDetailsCard() {
-            return firstVisible(
-              '[data-pmtest-id=\"guest-payment-step-card\"], [data-pmtest-id=\"user-payment-step-card\"], ' +
-              '[data-pmtest-id*=\"payment-step\"], [data-testid*=\"PaymentDetails\"], [data-testid*=\"payment-step\"]'
-            );
+            // Live dump (ai/logs/html/bodyscript.txt): data-pmtest-id=\"guest-payment-step-card\".
+            return document.querySelector(
+              '[data-pmtest-id=\"guest-payment-step-card\"], [data-pmtest-id=\"user-payment-step-card\"]'
+            ) || document.querySelector('[data-pmtest-id*=\"payment-step\"]');
           }
 
           function paymentDetailsVisible() {
             if (paymentDetailsCard()) return true;
-            var t = norm(document.body ? String(document.body.innerText || '').slice(0, 2500) : '');
+            var t = norm(document.body ? String(document.body.innerText || '') : '');
             return t.indexOf('paymentdetails') !== -1 && /applepay|continuewith/.test(t);
+          }
+
+          /// Dump: <button type=\"outline\">Continue with + <img alt=\"applepay icon\" src=\"...shared_applepay.png\">
+          function applePayMarkImg(root) {
+            if (!root || !root.querySelectorAll) return null;
+            var imgs = root.querySelectorAll('img');
+            for (var i = 0; i < imgs.length; i++) {
+              var img = imgs[i];
+              var alt = String(img.getAttribute('alt') || '').toLowerCase();
+              var src = String(img.getAttribute('src') || '').toLowerCase();
+              if (alt.indexOf('applepay') !== -1 || src.indexOf('applepay') !== -1) return img;
+            }
+            return null;
           }
 
           function isApplePayContinueCandidate(el) {
             if (!el || isNativeApplePayBuyButton(el)) return false;
             var pm = (el.getAttribute('data-pmtest-id') || '').toLowerCase();
             if (pm === 'complete-purchase-button' || pm === 'apple-login-button') return false;
+            if (applePayMarkImg(el)) {
+              var t0 = textOf(el);
+              if (/signinwithapple/.test(t0) || /addcredit|debitcard/.test(t0)) return false;
+              return true;
+            }
             var t = textOf(el);
             var html = norm(el.innerHTML || '');
             if (/signinwithapple/.test(t)) return false;
@@ -1395,37 +1413,75 @@ enum BookingFormPrefill {
 
           function findContinueWithApplePayButton() {
             if (!wantsApplePay()) return null;
-            // Payment Details only — never login \"Continue with Apple\" / Sign in with Apple.
-            var scopes = [];
+            var roots = [];
             var card = paymentDetailsCard();
-            if (card) scopes.push(card);
-            scopes.push(document);
-            for (var s = 0; s < scopes.length; s++) {
-              var nodes = scopes[s].querySelectorAll('button, a, [role=\"button\"]');
+            if (card) roots.push(card);
+            roots.push(document);
+            for (var s = 0; s < roots.length; s++) {
+              var img = applePayMarkImg(roots[s]);
+              if (img) {
+                var host = img.closest('button, a, [role=\"button\"]');
+                if (host && !isNativeApplePayBuyButton(host)) {
+                  var pm = (host.getAttribute('data-pmtest-id') || '').toLowerCase();
+                  if (pm !== 'complete-purchase-button' && pm !== 'apple-login-button') return host;
+                }
+              }
+              var nodes = roots[s].querySelectorAll('button, a, [role=\"button\"]');
               for (var i = 0; i < nodes.length; i++) {
-                var el = nodes[i];
-                if (!visible(el)) continue;
-                if (isApplePayContinueCandidate(el)) return el;
+                if (isApplePayContinueCandidate(nodes[i])) return nodes[i];
               }
             }
             return null;
           }
 
+          function tapContinueWithApplePay(btn) {
+            if (!btn) return false;
+            ensureInView(btn);
+            try {
+              if (btn.disabled) btn.disabled = false;
+              if (btn.getAttribute('aria-disabled') === 'true') btn.setAttribute('aria-disabled', 'false');
+              btn.removeAttribute('disabled');
+            } catch (e0) {}
+            var targets = [btn];
+            var inner = btn.querySelector('div');
+            if (inner) targets.push(inner);
+            var mark = applePayMarkImg(btn);
+            if (mark) targets.push(mark);
+            for (var i = 0; i < targets.length; i++) {
+              var el = targets[i];
+              try {
+                var opts = { bubbles: true, cancelable: true, view: window, composed: true };
+                el.dispatchEvent(new MouseEvent('pointerdown', opts));
+                el.dispatchEvent(new MouseEvent('mousedown', opts));
+                el.dispatchEvent(new MouseEvent('pointerup', opts));
+                el.dispatchEvent(new MouseEvent('mouseup', opts));
+                el.dispatchEvent(new MouseEvent('click', opts));
+                if (typeof el.click === 'function') el.click();
+              } catch (err) {}
+            }
+            return true;
+          }
+
           function clickContinueWithApplePay() {
             var now = Date.now();
             if (window.__parkingApplePayAt && (now - window.__parkingApplePayAt) < 2500) return false;
-            if (!contactReadyForPayment()) return false;
+            if (!contactReadyForPayment()) {
+              // Dump: Contact is collapsed (edit-email-step-button) while Payment Details is open.
+              var canSkip = !!(paymentDetailsCard()
+                && document.querySelector('[data-pmtest-id=\"edit-email-step-button\"]')
+                && !firstVisible(emailInputSelector()));
+              if (!canSkip) return false;
+            }
             var btn = findContinueWithApplePayButton();
             if (!btn) return false;
+            if (!tapContinueWithApplePay(btn)) return false;
             var ariaDisabled = btn.getAttribute('aria-disabled') === 'true';
-            if (btn.disabled || ariaDisabled) {
-              if (!forceClickDisabled(btn)) return false;
-              bridge({ type: 'log', message: 'Continue with Apple Pay forced' });
-            } else if (!click(btn, { scroll: false })) {
-              return false;
-            } else {
-              bridge({ type: 'log', message: 'Continue with Apple Pay tapped' });
-            }
+            bridge({
+              type: 'log',
+              message: (btn.disabled || ariaDisabled ? 'Continue with Apple Pay forced' : 'Continue with Apple Pay tapped')
+                + ' type=' + (btn.getAttribute('type') || '')
+                + ' alt=' + ((applePayMarkImg(btn) && applePayMarkImg(btn).getAttribute('alt')) || '')
+            });
             window.__parkingApplePayAt = now;
             return true;
           }
@@ -1437,10 +1493,21 @@ enum BookingFormPrefill {
             window.__parkingPaymentDiagAt = now;
             var card = paymentDetailsCard();
             var btn = findContinueWithApplePayButton();
+            var img = btn ? applePayMarkImg(btn) : (card ? applePayMarkImg(card) : applePayMarkImg(document));
+            var rect = 'norect';
+            try {
+              if (btn) {
+                var r = btn.getBoundingClientRect();
+                rect = Math.round(r.width) + 'x' + Math.round(r.height);
+              }
+            } catch (e) {}
             bridge({
               type: 'log',
               message: 'paymentDiag card=' + (card ? (((card.getAttribute('data-pmtest-id') || card.getAttribute('data-testid') || card.tagName) || '').slice(0, 48)) : 'none')
-                + ' btn=' + (btn ? ((btn.innerText || '').trim().slice(0, 28) + (btn.disabled ? ':disabled' : '')) : 'missing')
+                + ' btn=' + (btn ? ('<' + (btn.tagName || '') + ' type=' + (btn.getAttribute('type') || '') + '>') : 'missing')
+                + ' vis=' + !!(btn && visible(btn))
+                + ' rect=' + rect
+                + ' img=' + (img ? String(img.getAttribute('alt') || '').slice(0, 24) : 'none')
                 + ' ready=' + contactReadyForPayment()
                 + ' shownEmail=' + (displayedContactEmail() || 'none')
             });
@@ -3271,13 +3338,14 @@ enum BookingFormPrefill {
               }
               // ParkMobile Payment Details → Continue with Apple Pay; Confirm → I acknowledge.
               // Never taps Complete Purchase / Buy with Apple Pay.
-              // Hold Apple Pay until BookingConfig email is committed (guest receipts go there).
-              if (contactReadyForPayment() && clickContinueWithApplePay()) action = action || 'applePay';
-              if (contactReadyForPayment() && checkAcknowledgeBoxes()) action = action || 'acknowledge';
+              // Hold Apple Pay until BookingConfig email is committed (guest receipts go there),
+              // except when Contact is already collapsed on Payment Details (email is on file).
+              if (clickContinueWithApplePay()) action = action || 'applePay';
+              if ((contactReadyForPayment() || paymentDetailsCard()) && checkAcknowledgeBoxes()) action = action || 'acknowledge';
               if (action) {
                 return { status: 'advanced', filled: filled, action: action };
               }
-              if (!contactReadyForPayment()) {
+              if (!contactReadyForPayment() && !paymentDetailsCard()) {
                 return { status: 'waiting', filled: filled, action: 'awaitContact' };
               }
               if (filled > 0) {
@@ -3321,15 +3389,24 @@ enum BookingFormPrefill {
           var retryTimer = setInterval(function() {
             attempts += 1;
             latest = fillOnce();
-            // Only stop when fully done (or exhausted). Keep going through Reserve → guest → Save & Continue → vehicle.
-            if (latest.status === 'filled' || attempts >= maxAttempts) {
+            if (paymentDetailsCard() && !window.__parkingPaymentClock) {
+              window.__parkingPaymentClock = true;
+              attempts = 0;
+            }
+            var payPending = paymentSectionNeedsAction()
+              || (paymentDetailsVisible() && !window.__parkingApplePayAt);
+            if (latest.status === 'filled' && !payPending) {
+              stopRetry(retryTimer);
+            } else if (attempts >= maxAttempts && !payPending) {
               stopRetry(retryTimer);
             }
           }, 2000);
 
           window.__parkingPrefillKick = function() {
             latest = fillOnce();
-            if (latest.status === 'filled') stopRetry(retryTimer);
+            var payPending = paymentSectionNeedsAction()
+              || (paymentDetailsVisible() && !window.__parkingApplePayAt);
+            if (latest.status === 'filled' && !payPending) stopRetry(retryTimer);
             return latest;
           };
 
@@ -3337,7 +3414,9 @@ enum BookingFormPrefill {
           setTimeout(function() { latest = fillOnce(); }, 600);
           setTimeout(function() {
             latest = fillOnce();
-            if (latest.status === 'filled') stopRetry(retryTimer);
+            var payPending = paymentSectionNeedsAction()
+              || (paymentDetailsVisible() && !window.__parkingApplePayAt);
+            if (latest.status === 'filled' && !payPending) stopRetry(retryTimer);
           }, 1600);
 
           try {
