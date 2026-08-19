@@ -261,6 +261,7 @@ struct WebViewRepresentable: UIViewRepresentable {
             guard message.name == Self.bridgeName,
                   let body = message.body as? [String: Any]
             else { return }
+            let webView = message.webView
             DispatchQueue.main.async {
                 let type = body["type"] as? String ?? ""
                 if type == "log" {
@@ -291,6 +292,12 @@ struct WebViewRepresentable: UIViewRepresentable {
                     )
                     if !ParkingSessionStore.isProtectedURL(self.model.currentURL) {
                         AttemptedZoneStore.shared.remember(xhrURL: url, responseBody: res)
+                    }
+                } else if type == "htmlDump" {
+                    let reason = body["reason"] as? String ?? "stall"
+                    let page = body["url"] as? String ?? webView?.url?.absoluteString ?? ""
+                    if let webView {
+                        HTMLCapture.requestDump(from: webView, reason: reason, pageURL: page)
                     }
                 }
             }
@@ -379,6 +386,11 @@ struct WebViewRepresentable: UIViewRepresentable {
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             AppLog.log("WebView finish \(webView.url?.absoluteString ?? "(nil)")")
             publishNavigationState(from: webView)
+            HTMLCapture.requestDump(
+                from: webView,
+                reason: "loadFinish",
+                pageURL: webView.url?.absoluteString ?? ""
+            )
             scheduleAutoPrefill(for: webView)
         }
 

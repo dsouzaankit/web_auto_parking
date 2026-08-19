@@ -47,13 +47,20 @@ On checkout / login-to-checkout pages, the WebView will:
 ## LAN logs (Wi‑Fi)
 
 1. Phone and PC on the same Wi‑Fi; allow **Local Network** when prompted.
-2. Open **`http://<phone-ip>:8765/`** (prefer IP on Windows), **`/logs.txt`**, or **`/xhr.txt`**.
+2. Open **`http://<phone-ip>:8765/`** (prefer IP on Windows), **`/logs.txt`**, **`/xhr.txt`**, **`/hooks.txt`**, or **`/html`**.
 3. Toggle under **Garages → LAN logs**. Bonjour name: `webautoparking._http._tcp`.
 4. Log file is **cleared on each app launch** (cold start), then starts with `App launch v… build …`.
 
-Useful log lines: `Prefill inject`, `Prefill JS {"status":"advanced|filled|waiting",...}`, `action":"awaitAddressSearch|awaitManualZoneIdSubmit|awaitZonePrefill|awaitManualZoneSubmit|awaitZoneAuth|zoneContinue|setDuration|searchZonesMode|geo|pickZone|reserve|guest|awaitSignIn|autofillHint|loginSubmit|setTimes|awaitCheckout|saveContinue|vehicleAdd|vehicleConfirm|contactEdit|contactContinue|awaitContact|applePay|acknowledge"` (ParkChirp Keychain: bridge `parkChirpKeychain`), plus bridge hints like `vehicleDiag`, `paymentDiag`, `contactDiag`, `contact Edit tapped`, `Save & Continue tapped` / `forced`, `Continue with Apple Pay tapped` / `forced`, `vehicle Continue tapped btn=…`.
+Useful log lines: `Prefill inject`, `Prefill JS {"status":"advanced|filled|waiting",...}`, `action":"awaitAddressSearch|awaitManualZoneIdSubmit|awaitZonePrefill|awaitManualZoneSubmit|awaitZoneAuth|zoneContinue|setDuration|searchZonesMode|geo|pickZone|reserve|guest|awaitSignIn|autofillHint|loginSubmit|setTimes|awaitCheckout|saveContinue|vehicleAdd|vehicleConfirm|contactEdit|contactContinue|awaitContact|applePay|acknowledge"` (ParkChirp Keychain: bridge `parkChirpKeychain`), plus bridge hints like `checkoutDiag`, `vehicleDiag`, `paymentDiag`, `contactDiag` (`bound=` is the real matched tag), `prefillError`, `contact Edit tapped`, `Save & Continue tapped` / `forced`, `Continue with Apple Pay tapped` / `forced`, `vehicle Continue tapped btn=…`, `HTML dump reason=… /html`.
 
 **XHR capture (preferred on Windows):** the app hooks `fetch` / `XMLHttpRequest` in the WebView and writes request/response bodies to **`/xhr.txt`** (summaries also appear as `XHR …` lines in `/logs.txt`). Use this instead of the Web Inspector Network panel.
+
+**Page HTML dump (frontend-update debug):** one live snapshot, **overwritten in place** (no archive). Prefill ticks (~12s) and each WebView **load finish** dump every page, including search, zone start, Complete Purchase, and `/sessions/`. When automation hangs, pull the files — they are the current FE.
+
+- **`/hooks.txt`** — compact inventory: stepper text, `data-pmtest-id`s, each `<button>` (`type`, label, `img alt`), same-origin **iframe** HTML, shadow-root count. First file to pull after a stall.
+- **`/html`** / **`/html.txt`** — full `document.documentElement.outerHTML` (same idea as `ai/logs/html/bodyscript.txt`). Scripts are sandboxed and do not run.
+
+LAN diags on checkout: `checkoutDiag path=… checkoutState=… step=…`, plus `contactDiag` / `paymentDiag` / `vehicleDiag` with **`bound=`** (tag + `pmtest` + short `outerHTML` of the node we actually matched). Swallowed prefill exceptions log **`prefillError`**. Logs: `HTML dump reason=paymentPending chars=… /html /hooks.txt buttons=<button type=outline> text=Continue with img=applepay icon | …`.
 
 ## WebView inspector (Windows, USB)
 

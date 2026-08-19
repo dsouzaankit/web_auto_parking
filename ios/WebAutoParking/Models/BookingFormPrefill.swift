@@ -156,6 +156,37 @@ enum BookingFormPrefill {
               return r.width > 0 && r.height > 0;
             } catch (e) { return false; }
           }
+          function describeEl(el) {
+            if (!el) return 'none';
+            var tag = String(el.tagName || '?');
+            var type = '';
+            var pm = '';
+            var id = '';
+            var snippet = '';
+            try { type = el.getAttribute('type') || ''; } catch (e0) {}
+            try { pm = el.getAttribute('data-pmtest-id') || el.getAttribute('data-testid') || ''; } catch (e1) {}
+            try { id = el.id || ''; } catch (e2) {}
+            try { snippet = String(el.outerHTML || '').replace(/\\s+/g, ' ').trim().slice(0, 140); } catch (e3) {}
+            return tag
+              + (type ? ' type=' + type : '')
+              + (pm ? ' pmtest=' + pm : '')
+              + (id && !pm ? ' id=' + id : '')
+              + (snippet ? ' html=' + snippet : '');
+          }
+          function checkoutStepperText() {
+            var root = document.querySelector(
+              '[data-pmtest-id=\"guest-checkout-stepper\"], [data-pmtest-id*=\"checkout-stepper\"], [data-pmtest-id*=\"stepper\"]'
+            );
+            var t = '';
+            try {
+              t = String((root && root.innerText) || '').replace(/\\s+/g, ' ').trim();
+            } catch (e) {}
+            if (t) return t.slice(0, 400);
+            try {
+              t = String(document.body ? document.body.innerText : '').replace(/\\s+/g, ' ').trim();
+            } catch (e2) {}
+            return t.slice(0, 280);
+          }
           /// Only nudge scroll when mostly off-screen. `block:'center'` was yanking to Continue/submit every tick.
           function ensureInView(el) {
             if (!el) return;
@@ -361,11 +392,12 @@ enum BookingFormPrefill {
           }
 
           function emailInputSelector() {
-            return '#email, input[name=\"email\"], input[type=\"email\"], input[autocomplete=\"email\"], input[autocomplete=\"username\"], [data-testid=\"email-input\"], [data-pmtest-id*=\"email\"], input[id*=\"email\" i], input[name*=\"email\" i]';
+            // Tag-restrict pmtest: [data-pmtest-id*=\"email\"] also matches edit-email-step-button.
+            return '#email, input[name=\"email\"], input[type=\"email\"], input[autocomplete=\"email\"], input[autocomplete=\"username\"], input[data-testid=\"email-input\"], [data-testid=\"email-input\"], input[data-pmtest-id*=\"email\"], input[id*=\"email\" i], input[name*=\"email\" i], textarea[name=\"email\"], textarea[id*=\"email\" i]';
           }
 
           function phoneInputSelector() {
-            return '#phone, input[name=\"phone\"], input[type=\"tel\"], input[autocomplete=\"tel\"], [data-testid=\"phone-input\"], [data-pmtest-id*=\"phone\"], input[id*=\"phone\" i], input[name*=\"phone\" i]';
+            return '#phone, input[name=\"phone\"], input[type=\"tel\"], input[autocomplete=\"tel\"], input[data-testid=\"phone-input\"], [data-testid=\"phone-input\"], input[data-pmtest-id*=\"phone\"], input[id*=\"phone\" i], input[name*=\"phone\" i]';
           }
 
           /// Force email/phone from BookingConfig (overwrite guest temp emails like pm-test…@email.com).
@@ -501,6 +533,20 @@ enum BookingFormPrefill {
             return true;
           }
 
+          function logCheckoutStateDiagnostics() {
+            if (!isParkMobileCheckoutFlow()) return;
+            var now = Date.now();
+            if (window.__parkingCheckoutDiagAt && (now - window.__parkingCheckoutDiagAt) < 8000) return;
+            window.__parkingCheckoutDiagAt = now;
+            var q = location.search || '';
+            bridge({
+              type: 'log',
+              message: 'checkoutDiag path=' + (location.pathname || '')
+                + ' checkoutState=' + /(?:^|[?&])checkoutState=/i.test(q)
+                + ' step=' + checkoutStepperText().slice(0, 180)
+            });
+          }
+
           function logContactDiagnostics() {
             var now = Date.now();
             if (window.__parkingContactDiagAt && (now - window.__parkingContactDiagAt) < 8000) return;
@@ -512,6 +558,7 @@ enum BookingFormPrefill {
               type: 'log',
               message: 'contactDiag want=' + (cfg.email || '')
                 + ' input=' + (input ? (String(input.value || '').trim() || 'empty') : 'missing')
+                + ' bound=' + describeEl(input)
                 + ' shown=' + (shown || 'none')
                 + ' match=' + contactEmailMatchesConfig()
                 + ' needFix=' + contactNeedsEmailFix()
@@ -855,6 +902,8 @@ enum BookingFormPrefill {
                 + ' ready=' + (!!vehicleFormReady())
                 + ' root=' + (root ? (((root.getAttribute('data-pmtest-id') || root.getAttribute('data-testid') || root.tagName) || '').slice(0, 40)) : 'none')
                 + ' btn=' + (btn ? ((btn.innerText || '').trim().slice(0, 24) + (btn.disabled ? ':disabled' : '')) : 'missing')
+                + ' plateBound=' + describeEl(plate)
+                + ' btnBound=' + describeEl(btn)
             });
           }
 
@@ -1465,13 +1514,7 @@ enum BookingFormPrefill {
           function clickContinueWithApplePay() {
             var now = Date.now();
             if (window.__parkingApplePayAt && (now - window.__parkingApplePayAt) < 2500) return false;
-            if (!contactReadyForPayment()) {
-              // Dump: Contact is collapsed (edit-email-step-button) while Payment Details is open.
-              var canSkip = !!(paymentDetailsCard()
-                && document.querySelector('[data-pmtest-id=\"edit-email-step-button\"]')
-                && !firstVisible(emailInputSelector()));
-              if (!canSkip) return false;
-            }
+            if (!contactReadyForPayment()) return false;
             var btn = findContinueWithApplePayButton();
             if (!btn) return false;
             if (!tapContinueWithApplePay(btn)) return false;
@@ -1510,6 +1553,8 @@ enum BookingFormPrefill {
                 + ' img=' + (img ? String(img.getAttribute('alt') || '').slice(0, 24) : 'none')
                 + ' ready=' + contactReadyForPayment()
                 + ' shownEmail=' + (displayedContactEmail() || 'none')
+                + ' bound=' + describeEl(btn)
+                + ' step=' + checkoutStepperText().slice(0, 120)
             });
           }
 
@@ -3296,7 +3341,17 @@ enum BookingFormPrefill {
               var parkChirpStep = advanceParkChirp();
               if (parkChirpStep) return parkChirpStep;
               var zoneStep = advanceParkMobileZone();
-              if (zoneStep) return zoneStep;
+              if (zoneStep) {
+                if (isParkMobileCheckoutFlow()) {
+                  logCheckoutStateDiagnostics();
+                  logContactDiagnostics();
+                  logPaymentDiagnostics();
+                  if (vehiclePlateInput() || /\\/zone\\/vehicle/i.test(location.pathname || '')) {
+                    logVehicleFormDiagnostics();
+                  }
+                }
+                return zoneStep;
+              }
               var action = null;
               if (dismissCookieBanner()) action = 'cookie';
               if (clickReserveParkHere()) action = action || 'reserve';
@@ -3317,11 +3372,12 @@ enum BookingFormPrefill {
                 window.__parkingGarageVehicleForceAt = Date.now();
               }
               filled += fillParkMobileVehicleFields({ force: !!forceGarageVehicle });
-              if (isGarageCheckoutVehicleStep() || vehiclePlateInput()) {
-                logVehicleFormDiagnostics();
+              if (isParkMobileCheckoutFlow()) {
+                logCheckoutStateDiagnostics();
+                if (isGarageCheckoutVehicleStep() || vehiclePlateInput()) logVehicleFormDiagnostics();
+                logContactDiagnostics();
+                logPaymentDiagnostics();
               }
-              if (isParkMobileCheckoutFlow()) logContactDiagnostics();
-              if (isParkMobileCheckoutFlow()) logPaymentDiagnostics();
               if (clickSpotHeroVehicleConfirm()) action = action || 'vehicleConfirm';
               // Garage Vehicle Details uses Save & Continue — tap that before bare Continue.
               if (clickSaveAndContinue()
@@ -3366,14 +3422,44 @@ enum BookingFormPrefill {
                 return { status: 'filled', filled: 0, action: 'done' };
               }
               return { status: 'waiting', filled: 0, action: 'idle' };
-            } catch (e) {}
-            return { status: 'error', filled: 0, action: 'error' };
+            } catch (e) {
+              try {
+                bridge({
+                  type: 'log',
+                  message: 'prefillError ' + String((e && e.message) || e)
+                    + ' path=' + (location.pathname || '')
+                });
+              } catch (e2) {}
+              return { status: 'error', filled: 0, action: 'error' };
+            }
           }
 
           function stopRetry(timer) {
             if (timer) clearInterval(timer);
             window.__parkingPrefillBusy = false;
             window.__parkingPrefillKick = null;
+          }
+
+          /// Always overwrite LAN /html + /hooks.txt with the live page (throttled).
+          function maybeRequestHtmlDump(latest) {
+            var now = Date.now();
+            var reason = String((latest && latest.action) || 'tick');
+            if (window.__parkingHtmlDumpAt && (now - window.__parkingHtmlDumpAt) < 12000
+                && window.__parkingHtmlDumpReason === reason) return;
+            window.__parkingHtmlDumpAt = now;
+            window.__parkingHtmlDumpReason = reason;
+            bridge({
+              type: 'htmlDump',
+              reason: reason,
+              status: (latest && latest.status) || '',
+              url: String(location.href || '')
+            });
+          }
+
+          function tickFill() {
+            var latest = fillOnce();
+            maybeRequestHtmlDump(latest);
+            return latest;
           }
 
           // Re-entry from Swift (or wand): kick another fill without stacking timers.
@@ -3383,12 +3469,12 @@ enum BookingFormPrefill {
           }
 
           window.__parkingPrefillBusy = true;
-          var latest = fillOnce();
+          var latest = tickFill();
           var attempts = 0;
           var maxAttempts = 90; // ~3 minutes at 2s
           var retryTimer = setInterval(function() {
             attempts += 1;
-            latest = fillOnce();
+            latest = tickFill();
             if (paymentDetailsCard() && !window.__parkingPaymentClock) {
               window.__parkingPaymentClock = true;
               attempts = 0;
@@ -3403,7 +3489,7 @@ enum BookingFormPrefill {
           }, 2000);
 
           window.__parkingPrefillKick = function() {
-            latest = fillOnce();
+            latest = tickFill();
             var payPending = paymentSectionNeedsAction()
               || (paymentDetailsVisible() && !window.__parkingApplePayAt);
             if (latest.status === 'filled' && !payPending) stopRetry(retryTimer);
@@ -3411,9 +3497,9 @@ enum BookingFormPrefill {
           };
 
           // Immediate + short delayed passes for SPA form mount.
-          setTimeout(function() { latest = fillOnce(); }, 600);
+          setTimeout(function() { latest = tickFill(); }, 600);
           setTimeout(function() {
-            latest = fillOnce();
+            latest = tickFill();
             var payPending = paymentSectionNeedsAction()
               || (paymentDetailsVisible() && !window.__parkingApplePayAt);
             if (latest.status === 'filled' && !payPending) stopRetry(retryTimer);

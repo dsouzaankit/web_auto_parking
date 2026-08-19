@@ -358,6 +358,27 @@ enum LANLogServer {
             let text = XHRCapture.readAllText()
             let body = method == "HEAD" ? Data() : Data(text.utf8)
             sendResponse(connection: connection, status: 200, contentType: "text/plain; charset=utf-8", body: body, done: done)
+        case "/html", "/page.html", "/html.html":
+            let text = HTMLCapture.readHTML()
+            let body = method == "HEAD" ? Data() : Data(text.utf8)
+            sendResponse(
+                connection: connection,
+                status: 200,
+                contentType: "text/html; charset=utf-8",
+                body: body,
+                extraHeaders: [
+                    "Content-Security-Policy: sandbox allow-same-origin; default-src 'none'; img-src *; style-src 'unsafe-inline' *"
+                ],
+                done: done
+            )
+        case "/html.txt", "/page.txt":
+            let text = HTMLCapture.readHTML()
+            let body = method == "HEAD" ? Data() : Data(text.utf8)
+            sendResponse(connection: connection, status: 200, contentType: "text/plain; charset=utf-8", body: body, done: done)
+        case "/hooks.txt", "/hooks", "/html.hooks.txt":
+            let text = HTMLCapture.readHooks()
+            let body = method == "HEAD" ? Data() : Data(text.utf8)
+            sendResponse(connection: connection, status: 200, contentType: "text/plain; charset=utf-8", body: body, done: done)
         default:
             sendResponse(connection: connection, status: 404, contentType: "text/plain", body: Data("Not found".utf8), done: done)
         }
@@ -389,9 +410,9 @@ enum LANLogServer {
         </style>
         </head><body>
         <h1>Parking — LAN logs</h1>
-        <p class="muted">Port \(defaultPort) · <a href="/logs.txt">/logs.txt</a> · <a href="/xhr.txt">/xhr.txt</a></p>
+        <p class="muted">Port \(defaultPort) · <a href="/logs.txt">/logs.txt</a> · <a href="/xhr.txt">/xhr.txt</a> · <a href="/html">/html</a> · <a href="/html.txt">/html.txt</a> · <a href="/hooks.txt">/hooks.txt</a></p>
         <p>IP: <code>\(ipLine)</code><br/>mDNS: <code>\(hostLine)</code></p>
-        <p class="toolbar"><a href="/">Refresh</a> · <a href="/xhr.txt">XHR capture</a></p>
+        <p class="toolbar"><a href="/">Refresh</a> · <a href="/xhr.txt">XHR capture</a> · <a href="/html">Page HTML</a> · <a href="/hooks.txt">DOM hooks</a></p>
         <pre id="log">\(log)</pre>
         </body></html>
         """

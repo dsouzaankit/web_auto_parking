@@ -106,7 +106,7 @@ struct GarageListView: View {
             } header: {
                 Text("LAN logs")
             } footer: {
-                Text("Same Wi‑Fi as your PC. Prefer the IP URL on Windows. Port \(LANLogServer.defaultPort) · /logs.txt · /xhr.txt")
+                Text("Same Wi‑Fi as your PC. Prefer the IP URL on Windows. Port \(LANLogServer.defaultPort) · /logs.txt · /xhr.txt · /html · /hooks.txt")
             }
         }
         .navigationTitle("Parking")
