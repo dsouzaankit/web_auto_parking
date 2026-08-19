@@ -424,6 +424,10 @@ enum BookingFormPrefill {
 
           /// Guest checkout often collapses Contact with a throwaway pm-test…@email.com.
           /// Receipts go there unless we Edit and overwrite BookingConfig email before pay.
+          function isSpotHero() {
+            return /spothero/i.test(location.hostname || '');
+          }
+
           function isParkMobileCheckoutFlow() {
             var host = location.hostname || '';
             if (!/parkmobile/i.test(host)) return false;
@@ -711,6 +715,7 @@ enum BookingFormPrefill {
 
           /// Force plate + country + state from BookingConfig (overwrite wrong defaults like AL / partial plate).
           function fillParkMobileVehicleFields(opts) {
+            if (isSpotHero()) return 0;
             var force = !!(opts && opts.force);
             var filled = 0;
             if (cfg.licensePlateNumber) {
@@ -800,6 +805,7 @@ enum BookingFormPrefill {
           }
 
           function clickParkMobileAddVehicle() {
+            if (isSpotHero()) return false;
             var now = Date.now();
             if (window.__parkingPmAddVehicleAt && (now - window.__parkingPmAddVehicleAt) < 2500) return false;
             // Form already open — nothing to open.
@@ -992,6 +998,7 @@ enum BookingFormPrefill {
           }
 
           function clickParkMobileVehicleContinue() {
+            if (isSpotHero()) return false;
             var now = Date.now();
             if (window.__parkingLastSaveAt && (now - window.__parkingLastSaveAt) < 2500) return false;
             if (contactJustFilled()) return false;
@@ -1073,7 +1080,14 @@ enum BookingFormPrefill {
           function clickSpotHeroVehicleAdd() {
             var now = Date.now();
             if (window.__parkingSpotHeroAddAt && (now - window.__parkingSpotHeroAddAt) < 2500) return false;
+            // Modal already open.
+            if (spotHeroMakeModelInput() || firstVisible('#addVehicleLicensePlate, [data-testid=\"AddVehicle-input-plate\"]')) {
+              return false;
+            }
             var btn = document.querySelector('[data-testid=\"VehicleInfo-button-add-vehicle\"]');
+            if ((!btn || !visible(btn)) && spotHeroVehicleNeedsFill()) {
+              btn = document.querySelector('[data-testid=\"VehicleInfo-button-change-vehicle\"]');
+            }
             if (!btn || !visible(btn)) {
               // Fallback: Add near Vehicle label, but never Payment Add.
               btn = findByText('button, a, [role=\"button\"]', /^add$/);
@@ -1083,8 +1097,10 @@ enum BookingFormPrefill {
               }
             }
             if (!btn || !visible(btn) || btn.disabled) return false;
+            var which = btn.getAttribute('data-testid') || ((btn.innerText || '').trim().slice(0, 16));
             if (!click(btn)) return false;
             window.__parkingSpotHeroAddAt = now;
+            bridge({ type: 'log', message: 'SpotHero vehicle open btn=' + which });
             return true;
           }
 
@@ -1226,6 +1242,51 @@ enum BookingFormPrefill {
             // Don't confirm while the make/model menu is still open.
             if (document.querySelector('.fe-ui-async-select__menu')) return false;
             return hasMake || !cfg.makeAndModel;
+          }
+
+          function spotHeroVehicleDisplayText() {
+            var el = document.querySelector('[data-testid=\"VehicleInfoDisplay-vehicle-details\"]');
+            return el ? String(el.innerText || '').replace(/\\s+/g, ' ').trim() : '';
+          }
+
+          /// Collapsed row \"No Vehicle · U13NLN\" still needs Make and Model via Change.
+          function spotHeroVehicleNeedsFill() {
+            if (!isSpotHero()) return false;
+            if (spotHeroMakeModelInput()
+                || firstVisible('#addVehicleLicensePlate, [data-testid=\"AddVehicle-input-plate\"]')) {
+              return !spotHeroVehicleModalReady();
+            }
+            var add = document.querySelector('[data-testid=\"VehicleInfo-button-add-vehicle\"]');
+            if (add && visible(add)) return true;
+            var shown = spotHeroVehicleDisplayText();
+            var t = norm(shown);
+            if (!t) {
+              var change = document.querySelector('[data-testid=\"VehicleInfo-button-change-vehicle\"]');
+              return !!(change && visible(change));
+            }
+            if (/novehicle/.test(t)) return true;
+            if (cfg.makeAndModel && t.indexOf(norm(cfg.makeAndModel)) === -1) return true;
+            if (cfg.licensePlateNumber && t.indexOf(norm(cfg.licensePlateNumber)) === -1) return true;
+            return false;
+          }
+
+          function logSpotHeroVehicleDiagnostics() {
+            if (!isSpotHero()) return;
+            var now = Date.now();
+            if (window.__parkingSpotHeroVehDiagAt && (now - window.__parkingSpotHeroVehDiagAt) < 8000) return;
+            window.__parkingSpotHeroVehDiagAt = now;
+            var add = document.querySelector('[data-testid=\"VehicleInfo-button-add-vehicle\"]');
+            var change = document.querySelector('[data-testid=\"VehicleInfo-button-change-vehicle\"]');
+            bridge({
+              type: 'log',
+              message: 'spotHeroVehicle display=' + (spotHeroVehicleDisplayText() || 'empty').slice(0, 48)
+                + ' add=' + !!(add && visible(add))
+                + ' change=' + !!(change && visible(change))
+                + ' makeInput=' + !!spotHeroMakeModelInput()
+                + ' selected=' + (spotHeroSelectedMakeModel() || 'none').slice(0, 32)
+                + ' ready=' + !!spotHeroVehicleModalReady()
+                + ' needFill=' + spotHeroVehicleNeedsFill()
+            });
           }
 
           function clickSpotHeroVehicleConfirm() {
@@ -1381,6 +1442,7 @@ enum BookingFormPrefill {
           function vehicleSectionNeedsInput() {
             var body = norm(document.body ? document.body.innerText : '');
             if (/novehicleinformationisrequired/.test(body)) return false;
+            if (spotHeroVehicleNeedsFill()) return true;
             if (document.querySelector('[data-testid=\"VehicleInfo-button-add-vehicle\"]')) return true;
             if (spotHeroMakeModelInput()) return true;
             var plate = firstVisible('#vrn, input[name=\"vrn\"], [data-testid=\"Vehicle-input-plate\"]');
@@ -3378,11 +3440,13 @@ enum BookingFormPrefill {
                 logContactDiagnostics();
                 logPaymentDiagnostics();
               }
+              if (isSpotHero()) logSpotHeroVehicleDiagnostics();
               if (clickSpotHeroVehicleConfirm()) action = action || 'vehicleConfirm';
               // Garage Vehicle Details uses Save & Continue — tap that before bare Continue.
-              if (clickSaveAndContinue()
+              // Never on SpotHero: that Confirm matcher closes Add Vehicle before Make and Model.
+              if (!isSpotHero() && (clickSaveAndContinue()
                   || clickParkMobileVehicleContinue()
-                  || clickGarageVehicleContinueAggressive()) {
+                  || clickGarageVehicleContinueAggressive())) {
                 action = action || 'vehicleConfirm';
               }
               // Collapsed guest Contact with a throwaway email — open Edit before Apple Pay.
@@ -3412,6 +3476,9 @@ enum BookingFormPrefill {
                   return { status: 'waiting', filled: filled, action: 'partial' };
                 }
                 return { status: 'filled', filled: filled, action: 'done' };
+              }
+              if (isSpotHero() && spotHeroVehicleNeedsFill()) {
+                return { status: 'waiting', filled: filled, action: 'awaitVehicle' };
               }
               if (paymentSectionNeedsAction() || (paymentDetailsVisible() && !window.__parkingApplePayAt)) {
                 return { status: 'waiting', filled: filled, action: 'paymentPending' };
