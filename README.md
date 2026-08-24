@@ -53,7 +53,7 @@ On checkout / login-to-checkout pages, the WebView will:
 
 Useful log lines: `Prefill inject`, `Prefill JS {"status":"advanced|filled|waiting",...}`, `action":"awaitAddressSearch|awaitManualZoneIdSubmit|awaitZonePrefill|awaitManualZoneSubmit|awaitZoneAuth|zoneContinue|setDuration|searchZonesMode|geo|pickZone|reserve|guest|awaitSignIn|autofillHint|loginSubmit|setTimes|awaitCheckout|saveContinue|vehicleAdd|vehicleConfirm|contactEdit|contactContinue|awaitContact|applePay|acknowledge"` (ParkChirp Keychain: bridge `parkChirpKeychain`), plus bridge hints like `checkoutDiag`, `vehicleDiag`, `spotHeroVehicle`, `paymentDiag`, `contactDiag` (`bound=` is the real matched tag), `prefillError`, `contact Edit tapped`, `Save & Continue tapped` / `forced`, `Continue with Apple Pay tapped` / `forced`, `SpotHero vehicle open btn=…`, `vehicle Continue tapped btn=…`, `HTML dump reason=… /html`.
 
-**XHR capture (preferred on Windows):** the app hooks `fetch` / `XMLHttpRequest` in the WebView and writes request/response bodies to **`/xhr.txt`** (summaries also appear as `XHR …` lines in `/logs.txt`). Use this instead of the Web Inspector Network panel.
+**XHR capture:** the app hooks `fetch` / `XMLHttpRequest` in the WebView and writes request/response bodies to **`/xhr.txt`** (summaries also appear as `XHR …` lines in `/logs.txt`).
 
 **If the screen looks stuck:** say so (which step). You do not need to describe buttons or HTML. Expected pauses already need you: **Confirm Zone**, street-address search (`awaitAddressSearch`), ParkChirp **Passwords**, captcha, and native **Complete Purchase** (never tapped). Anything else sitting still is a stall.
 
@@ -63,16 +63,6 @@ Useful log lines: `Prefill inject`, `Prefill JS {"status":"advanced|filled|waiti
 - **`/html`** / **`/html.txt`** — full `document.documentElement.outerHTML` (same idea as `ai/logs/html/bodyscript.txt`). Scripts are sandboxed and do not run.
 
 LAN diags on checkout: `checkoutDiag path=… checkoutState=… step=…`, plus `contactDiag` / `paymentDiag` / `vehicleDiag` with **`bound=`** (tag + `pmtest` + short `outerHTML` of the node we actually matched). Swallowed prefill exceptions log **`prefillError`**. Logs: `HTML dump reason=paymentPending chars=… /html /hooks.txt buttons=<button type=outline> text=Continue with img=applepay icon | …`.
-
-## WebView inspector (Windows, USB)
-
-Safari Web Inspector via [`ios-safari-remote-debug-kit`](https://github.com/HimbeersaftLP/ios-safari-remote-debug-kit) is useful for DOM/console, but on Windows **`ios-webkit-debug-proxy` usually does not expose the Network domain** (`Network was not found` / no XHR). Prefer **`/xhr.txt`** above for API learning.
-
-1. App sets `webView.isInspectable = true` (iOS 16.4+).
-2. Phone: **Settings → Safari → Advanced → Web Inspector** on; USB + trust in **Apple Devices**.
-3. From `P:\all_scripts\iOS apps\env_setup`: run `.\start-ios-webview-debug.ps1` (first-time: `.\setup-ios-webview-debug.ps1`).
-4. Open a page in the app, pick it at `http://localhost:9222/`, then `http://localhost:8080/Main.html?ws=localhost:9222/devtools/page/N`.
-5. If the inspector shows **Internal Error** / `Program` TypeError, close extra inspector tabs (only one client per page), regenerate protocol for your iOS major version, or skip Network and use `/xhr.txt`.
 
 ## Providers
 
