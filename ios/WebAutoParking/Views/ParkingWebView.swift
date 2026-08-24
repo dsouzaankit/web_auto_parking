@@ -131,6 +131,7 @@ struct WebViewRepresentable: UIViewRepresentable {
         webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
+        // Inspect (PC) / Safari Web Inspector can attach (iOS 16.4+).
         if #available(iOS 16.4, *) {
             webView.isInspectable = true
         }

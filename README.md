@@ -55,6 +55,8 @@ Useful log lines: `Prefill inject`, `Prefill JS {"status":"advanced|filled|waiti
 
 **XHR capture:** the app hooks `fetch` / `XMLHttpRequest` in the WebView and writes request/response bodies to **`/xhr.txt`** (summaries also appear as `XHR …` lines in `/logs.txt`).
 
+**Inspect (PC):** `WKWebView.isInspectable = true` (iOS 16.4+) so the Inspect desktop app (or Safari Web Inspector) can attach for DOM/console. Phone: **Settings → Safari → Advanced → Web Inspector**. Prefer **`/xhr.txt`** for Network — that panel is often missing on Windows.
+
 **If the screen looks stuck:** say so (which step). You do not need to describe buttons or HTML. Expected pauses already need you: **Confirm Zone**, street-address search (`awaitAddressSearch`), ParkChirp **Passwords**, captcha, and native **Complete Purchase** (never tapped). Anything else sitting still is a stall.
 
 **Page HTML dump (frontend-update debug):** one live snapshot, **overwritten in place** (no archive). Prefill ticks (~12s) and each WebView **load finish** dump every page, including search, zone start, Complete Purchase, and `/sessions/`. While prefill is still looping (`waiting` / `paymentPending`), `/hooks.txt` then `/html` are the current FE. After `Continue with Apple Pay tapped` the script may log `done` and **stop dumping** even if Payment Details did not change — that case only shows up if you still see it on the phone.
