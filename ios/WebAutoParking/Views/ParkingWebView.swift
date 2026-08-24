@@ -117,7 +117,6 @@ struct WebViewRepresentable: UIViewRepresentable {
         // Isolate from other WebViews so one bad page cannot take down every tab.
         config.processPool = WKProcessPool()
         config.userContentController.add(context.coordinator, name: Coordinator.bridgeName)
-        // Reliable XHR capture for LAN — Safari Web Inspector Network domain is unavailable via iwdp on Windows.
         config.userContentController.addUserScript(XHRCapture.userScript())
         // ParkMobile zone prefill uses navigator.geolocation; stub with native Core Location.
         config.userContentController.addUserScript(
@@ -132,7 +131,6 @@ struct WebViewRepresentable: UIViewRepresentable {
         webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.contentInsetAdjustmentBehavior = .automatic
-        // Opt-in for Safari Web Inspector / ios-webkit-debug-proxy (iOS 16.4+).
         if #available(iOS 16.4, *) {
             webView.isInspectable = true
         }

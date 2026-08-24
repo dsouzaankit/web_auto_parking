@@ -1,7 +1,7 @@
 import Foundation
 import WebKit
 
-/// In-app fetch/XHR capture for LAN debugging when Safari Web Inspector Network is unavailable.
+/// In-app fetch/XHR capture served on the LAN debug port.
 enum XHRCapture {
     private static let queue = DispatchQueue(label: "com.webautoparking.xhr-capture")
     private static let maxBytes = 512 * 1024
