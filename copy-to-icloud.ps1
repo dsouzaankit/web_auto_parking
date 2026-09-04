@@ -11,21 +11,23 @@
 
   Usage:
     .\copy-to-icloud.ps1
-    .\deploy.ps1              # wrapper; same iCloud paste + AltServer tray
+    .\deploy.ps1              # wrapper; same iCloud paste (AltServer opt-in)
 
 .PARAMETER SourceIpa
   Optional override path to an .ipa (default: ios\build artifacts\ipa\WebAutoParking.ipa).
 
+.PARAMETER EnsureAltStorePrep
+  Opt-in: start AltServer / Clash multicast prep after copy. Default skips (SideStore).
+
 .PARAMETER SkipAltStorePrep
-  Do not start AltServer / Clash multicast prep (env_setup). Phone-subnet
-  check is USB plug-in, not this script. deploy.ps1 passes this so prep
-  runs once after the copy.
+  Deprecated alias for the default (skip). deploy.ps1 passes this so prep runs once in parent.
 
 .PARAMETER NoWaitEnter
   Do not wait for Enter (when invoked as a child of deploy.ps1).
 #>
 param(
     [string] $SourceIpa = '',
+    [switch] $EnsureAltStorePrep,
     [switch] $SkipAltStorePrep,
     [switch] $NoWaitEnter
 )
@@ -88,7 +90,10 @@ function Write-Step($Message) {
 }
 
 function Invoke-ProjectAltStoreDeployPrep {
-    if ($SkipAltStorePrep) { return }
+    if (-not $EnsureAltStorePrep -or $SkipAltStorePrep) {
+        Write-Host '[altserver] Deploy prep skipped (default). Pass -EnsureAltStorePrep for AltStore tray.' -ForegroundColor DarkYellow
+        return
+    }
     $join = @(
         (Join-Path $ProjectRoot 'env_setup\altserver_refresh\lib\Join-AltStoreDeployPrep.ps1')
         (Join-Path $ProjectRoot 'env_setup\altserver_refresh\Join-AltStoreDeployPrep.ps1')
@@ -237,9 +242,9 @@ if (-not (Test-Path -LiteralPath $ICloudDownloads)) {
 Write-Host ""
 Write-Host "copy-to-icloud (unique IPA name - same split as ios_3d_loop_segments)"
 Write-Host "  [PC]  1. This script (inject BookingConfig + copy IPA to iCloud Downloads)"
-Write-Host "  [PC]     AltServer tray (env_setup); phone subnet is USB plug-in. -SkipAltStorePrep to skip tray"
+Write-Host "  [PC]     AltServer tray skipped by default. Pass -EnsureAltStorePrep for AltStore."
 Write-Host "  [YOU] 2. iPhone Files -> iCloud Drive -> Downloads -> $DestIpaName"
-Write-Host "  [YOU] 3. AltStore -> My Apps -> + -> select the IPA"
+Write-Host "  [YOU] 3. SideStore or AltStore -> My Apps -> + -> select the IPA"
 Write-Host ""
 
 $IpaToCopy = $LocalIpa
@@ -284,8 +289,8 @@ if (Test-Path -LiteralPath $LocalBookingConfig) {
 Write-Host ""
 Write-Host "Next on iPhone:"
 Write-Host "  Wait until Files shows full size (~$SizeKb KB)"
-Write-Host "  AltStore -> My Apps -> + -> $DestIpaName"
-Write-Host "  Or AltServer Sideload: $IpaToCopy"
+Write-Host "  SideStore or AltStore -> My Apps -> + -> $DestIpaName"
+Write-Host "  Or AltServer Sideload (AltStore path): $IpaToCopy"
 
 Invoke-ProjectAltStoreDeployPrep
 Exit-WithEnter 0

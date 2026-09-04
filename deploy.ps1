@@ -11,9 +11,9 @@
 
   Deploy workflow:
     1. Build/download IPA (gh workflow / Actions artifact)
-    2. Run:  .\deploy.ps1   (calls copy-to-icloud.ps1; also starts AltServer unless
-       -SkipAltStorePrep; phone subnet is USB plug-in)
-    3. On iPhone: AltStore -> My Apps -> + -> pick the timestamped IPA from
+    2. Run:  .\deploy.ps1   (calls copy-to-icloud.ps1; AltServer skipped by default —
+       pass -EnsureAltStorePrep for AltStore tray; phone subnet is USB plug-in)
+    3. On iPhone: SideStore or AltStore -> My Apps -> + -> pick the timestamped IPA from
        Files -> iCloud Drive -> Downloads
        Or AltServer Sideload of ios\build artifacts\ipa\WebAutoParking.prepared.ipa
 
@@ -21,7 +21,11 @@
 
 .PARAMETER SkipAltStorePrep
   Do not start AltServer / Clash multicast prep (env_setup). Phone-subnet
-  check is USB plug-in, not this script.
+  check is USB plug-in, not this script. Default behavior (SideStore); kept for
+  callers that still pass the switch.
+
+.PARAMETER EnsureAltStorePrep
+  Opt-in: start AltServer / Clash multicast prep after paste.
 
 .PARAMETER NoWaitEnter
   Do not wait for Enter (child callers). Direct run waits, including on errors.
@@ -30,9 +34,10 @@
   powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 
 .EXAMPLE
-  .\deploy.ps1 -SkipAltStorePrep
+  .\deploy.ps1 -EnsureAltStorePrep
 #>
 param(
+    [switch] $EnsureAltStorePrep,
     [switch] $SkipAltStorePrep,
     [switch] $NoWaitEnter
 )
@@ -72,7 +77,10 @@ function Write-Step($Message) {
 }
 
 function Invoke-ProjectAltStoreDeployPrep {
-    if ($SkipAltStorePrep) { return }
+    if (-not $EnsureAltStorePrep -or $SkipAltStorePrep) {
+        Write-Host '[altserver] Deploy prep skipped (default). Pass -EnsureAltStorePrep for AltStore tray.' -ForegroundColor DarkYellow
+        return
+    }
     $join = @(
         (Join-Path $ProjectRoot 'env_setup\altserver_refresh\lib\Join-AltStoreDeployPrep.ps1')
         (Join-Path $ProjectRoot 'env_setup\altserver_refresh\Join-AltStoreDeployPrep.ps1')
@@ -102,9 +110,9 @@ if (-not (Test-Path -LiteralPath $CopyScript)) {
 Write-Host ""
 Write-Host "Deploy workflow:"
 Write-Host "  [PC]  1. This script (inject BookingConfig + copy IPA via copy-to-icloud.ps1)"
-Write-Host "  [PC]     AltServer tray (env_setup); phone subnet is USB plug-in. -SkipAltStorePrep to skip tray"
+Write-Host "  [PC]     AltServer tray skipped by default. Pass -EnsureAltStorePrep for AltStore."
 Write-Host "  [YOU] 2. iPhone Files -> iCloud Drive -> Downloads -> WebAutoParking-b{build}-{time}.ipa"
-Write-Host "  [YOU] 3. AltStore -> My Apps -> + -> select the IPA"
+Write-Host "  [YOU] 3. SideStore or AltStore -> My Apps -> + -> select the IPA"
 Write-Host ""
 
 Write-Step "Pasting IPA to iCloud (copy-to-icloud)"

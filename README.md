@@ -122,8 +122,8 @@ See [ios/BUILD-WITHOUT-MAC.md](ios/BUILD-WITHOUT-MAC.md). Short path:
 
 1. Push to `master` (or **Actions → ios-build → Run workflow** — IPA only builds on `workflow_dispatch`)
 2. Download **`WebAutoParking-ipa`**
-3. Run **`.\deploy.ps1`** — calls **`copy-to-icloud.ps1`**: injects `BookingConfig.json`, strips broken `_CodeSignature`, copies timestamped `WebAutoParking-b{build}-{timestamp}.ipa` to iCloud Downloads (removes older copies). Also starts **AltServer** (tray) via `env_setup\altserver_refresh` (`-SkipAltStorePrep` to skip). Phone-subnet check stays on **USB plug-in**. Paste-only (no extra wrapper): **`.\copy-to-icloud.ps1`**.
-4. Install via **AltStore → My Apps → +**. **incorrect/invalid format** is often benign (iCloud still syncing or a flaky handoff) — ignore it if Parking appears under My Apps and launches. Only force-quit/reopen, wait for full IPA size, or **AltServer Sideload** if it never installs.
+3. Run **`.\deploy.ps1`** — calls **`copy-to-icloud.ps1`**: injects `BookingConfig.json`, strips broken `_CodeSignature`, copies timestamped `WebAutoParking-b{build}-{timestamp}.ipa` to iCloud Downloads (removes older copies). AltServer tray prep is **skipped by default** (`-EnsureAltStorePrep` for AltStore). Phone-subnet check stays on **USB plug-in**. Paste-only (no extra wrapper): **`.\copy-to-icloud.ps1`**.
+4. Install via **SideStore nightly** or **AltStore → My Apps → +**. Wait for a **fully local** IPA (no iCloud stub). **incorrect/invalid format** on AltStore / SideStore **stable** was seen here; **SideStore nightly** worked. Free ID = **3** apps — don’t keep AltStore + SideStore together. Full SideStore setup: [Loop Segments BUILD-WITHOUT-MAC §2a](../ios_3d_loop_segments/ios/BUILD-WITHOUT-MAC.md#2a-install-with-sidestore-nightly--preferred-when-altstore-flakes).
 
 CI ships the example config; personal installs need step 3 (or the IPA will prefill placeholders).
 

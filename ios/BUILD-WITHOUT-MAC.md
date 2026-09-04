@@ -1,6 +1,6 @@
 # Build and install without a Mac
 
-Same approach as [`ios_3d_loop_segments`](../../ios_3d_loop_segments/ios/BUILD-WITHOUT-MAC.md): compile an IPA in the cloud, sideload with **AltStore** on Windows.
+Same approach as [`ios_3d_loop_segments`](../../ios_3d_loop_segments/ios/BUILD-WITHOUT-MAC.md): compile an IPA in the cloud, sideload on Windows. Prefer **SideStore nightly** when AltStore (or SideStore stable) shows **incorrect data format**; otherwise AltStore + AltServer is fine.
 
 ## Get an IPA
 
@@ -15,23 +15,35 @@ powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 .\copy-to-icloud.ps1
 ```
 
-`deploy.ps1` reuses `copy-to-icloud.ps1` (same split as Loop Segments). That helper injects local `BookingConfig.json`, strips `_CodeSignature` so AltStore can re-sign, prunes older `WebAutoParking*.ipa` in iCloud Downloads, then copies a timestamped `WebAutoParking-b{build}-{yyyyMMdd-HHmmss}.ipa` to `%USERPROFILE%\iCloudDrive\Downloads` (or `C:\Users\dsouzaankit\iCloudDrive\Downloads` when present).
+`deploy.ps1` reuses `copy-to-icloud.ps1` (same split as Loop Segments). That helper injects local `BookingConfig.json`, strips `_CodeSignature` so SideStore / AltStore can re-sign, prunes older `WebAutoParking*.ipa` in iCloud Downloads, then copies a timestamped `WebAutoParking-b{build}-{yyyyMMdd-HHmmss}.ipa` to `%USERPROFILE%\iCloudDrive\Downloads` (or `C:\Users\dsouzaankit\iCloudDrive\Downloads` when present).
 
-Optional signed builds: set secrets `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`. Without them the IPA is unsigned and AltStore re-signs with your Apple ID.
+Optional signed builds: set secrets `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`. Without them the IPA is unsigned and the store re-signs with your Apple ID.
 
 Workflow: [`.github/workflows/ios-build.yml`](../.github/workflows/ios-build.yml).
 
 App icon: same packaging as Loop Segments — single `AppIcon.appiconset/AppIcon.png` (1024), `CFBundleIconName`, `TARGETED_DEVICE_FAMILY: "1,2"`, catalog via main target sources (not a separate `resources` entry). After icon changes: **delete Parking on the phone**, then install the new IPA (SpringBoard/Control Center cache blanks).
 
+## Install (SideStore nightly — preferred when AltStore flakes)
+
+Full SideStore steps (iloader, LocalDevVPN, pairing, free 3-app slots): Loop Segments [BUILD-WITHOUT-MAC.md §2a](../../ios_3d_loop_segments/ios/BUILD-WITHOUT-MAC.md#2a-install-with-sidestore-nightly--preferred-when-altstore-flakes). Official: [docs.sidestore.io](https://docs.sidestore.io/docs/installation/prerequisites).
+
+**Confirmed:** SideStore **stable** and AltStore both hit **incorrect data format** here; **SideStore nightly** worked. Prefer nightly. Delete **AltStore** if you switch (free ID = max **3** apps — SideStore + Parking + Loop Segments fills the quota).
+
+1. Wait until Files shows the **full size** IPA (no iCloud stub).
+2. **LocalDevVPN → Connect**.
+3. **SideStore → My Apps → +** → pick the timestamped IPA (or Files → Share → SideStore).
+4. **Settings → General → VPN & Device Management** → Trust your Apple ID (first install).
+5. Refresh before ~7 days: LocalDevVPN on → tap **7 DAYS** / Refresh in SideStore.
+
 ## Install (AltStore)
 
 1. AltServer on PC + AltStore on phone (same Wi‑Fi; free Apple ID).
-2. On the **iPhone**: **AltStore → My Apps → +** → pick the timestamped IPA from iCloud Downloads. **invalid format** / **incorrect format** is often benign (partial iCloud sync or a flaky AltStore handoff) — if Parking shows under My Apps and opens, ignore the toast. Only force-quit/reopen AltStore, wait for full sync, then retry (or **AltServer → Sideload** the same file from the PC) if it never installs.
+2. On the **iPhone**: **AltStore → My Apps → +** → pick the timestamped IPA from iCloud Downloads. **invalid format** / **incorrect format** is often a partial iCloud sync or flaky signing — wait for full size, retry; if it never installs, use **SideStore nightly** (above) or **AltServer → Sideload** the same file from the PC.
 3. Wait until Files shows the **full size** before installing from iCloud.
 4. **Settings → General → VPN & Device Management** → Trust your Apple ID (first install).
 5. Free Apple ID cert lasts ~7 days — **Refresh** in AltStore before expiry (no new IPA; retry if that flakes — same error string, different cause).
 
-Full AltStore / Wi‑Fi troubleshooting: see the Loop Segments [BUILD-WITHOUT-MAC.md](../../ios_3d_loop_segments/ios/BUILD-WITHOUT-MAC.md).
+Full AltStore / Wi‑Fi / Sideloadly troubleshooting: Loop Segments [BUILD-WITHOUT-MAC.md](../../ios_3d_loop_segments/ios/BUILD-WITHOUT-MAC.md).
 
 ## Local Mac (optional)
 
