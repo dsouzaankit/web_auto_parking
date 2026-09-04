@@ -33,7 +33,7 @@ Full SideStore steps (iloader, LocalDevVPN, pairing, free 3-app slots): Loop Seg
 2. **LocalDevVPN → Connect**.
 3. **SideStore → My Apps → +** → pick the timestamped IPA (or Files → Share → SideStore).
 4. **Settings → General → VPN & Device Management** → Trust your Apple ID (first install).
-5. Refresh before ~7 days: LocalDevVPN on → tap **7 DAYS** / Refresh in SideStore.
+5. **Refresh / expired cert — no PC:** LocalDevVPN on → tap **7 DAYS** / Refresh in SideStore (works after “Unable to Verify App”). PC only to re-place the pairing file (iloader) after iOS update/reset.
 
 ## Install (AltStore)
 
