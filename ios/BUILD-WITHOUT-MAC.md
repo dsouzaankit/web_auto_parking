@@ -34,6 +34,7 @@ Full SideStore steps (iloader, LocalDevVPN, pairing, free 3-app slots): Loop Seg
 3. **SideStore → My Apps → +** → pick the timestamped IPA (or Files → Share → SideStore).
 4. **Settings → General → VPN & Device Management** → Trust your Apple ID (first install).
 5. **Refresh / expired cert — no PC:** LocalDevVPN on → tap **7 DAYS** / Refresh in SideStore (works after “Unable to Verify App”). PC only to re-place the pairing file (iloader) after iOS update/reset.
+6. **Optional Shortcuts auto-refresh:** Shortcuts → SideStore **Refresh All Apps** → Automation (Time of Day / charging, **Run Immediately**). Same caveats as Loop Segments: Wi‑Fi + LocalDevVPN required; not 100% reliable; locked phone often fails; Trust still manual; **Always Allow** on first run; still verify weekly. Full steps: [SideStore Shortcuts auto-refresh](../../ios_3d_loop_segments/ios/BUILD-WITHOUT-MAC.md#sidestore-shortcuts-auto-refresh-optional).
 
 ## Install (AltStore)
 
