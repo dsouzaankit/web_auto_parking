@@ -2166,11 +2166,6 @@ enum BookingFormPrefill {
           /// Also cache v2 tariff/options max/step for duration targeting.
           function cacheV2TariffOptionsPayload(data) {
             try {
-              var list = null;
-              if (Array.isArray(data)) list = data;
-              else if (data && Array.isArray(data.options)) list = data.options;
-              else if (data && Array.isArray(data.tariffs)) list = data.tariffs;
-              else if (data && Array.isArray(data.durations)) list = data.durations;
               var maxM = -1;
               var stepGuess = 0;
               var minsSeen = [];
@@ -2181,6 +2176,20 @@ enum BookingFormPrefill {
                 minsSeen.push(n);
                 if (n > maxM) maxM = n;
               }
+              // Live shape: { timebasedOptions: { minimumMinutes, timeStepMinutes, maximumMinutes } }
+              var tb = data && data.timebasedOptions;
+              if (tb && typeof tb === 'object') {
+                consider(tb.maximumMinutes || tb.maxMinutes || tb.maximum);
+                if (tb.timeStepMinutes || tb.stepMinutes || tb.step) {
+                  stepGuess = Number(tb.timeStepMinutes || tb.stepMinutes || tb.step) || 0;
+                }
+                if (tb.minimumMinutes) window.__parkingV2TariffMin = Number(tb.minimumMinutes) || 20;
+              }
+              var list = null;
+              if (Array.isArray(data)) list = data;
+              else if (data && Array.isArray(data.options)) list = data.options;
+              else if (data && Array.isArray(data.tariffs)) list = data.tariffs;
+              else if (data && Array.isArray(data.durations)) list = data.durations;
               if (list) {
                 for (var i = 0; i < list.length; i++) {
                   var row = list[i] || {};
@@ -2190,9 +2199,10 @@ enum BookingFormPrefill {
               }
               if (data && typeof data === 'object') {
                 consider(data.maxDurationInMinutes || data.maxParkingDurationInMinutes
-                  || data.maximumDurationInMinutes || data.maxDuration);
-                if (data.step || data.durationStep || data.intervalInMinutes) {
-                  stepGuess = Number(data.step || data.durationStep || data.intervalInMinutes) || 0;
+                  || data.maximumDurationInMinutes || data.maxDuration || data.maximumMinutes);
+                if (data.step || data.durationStep || data.intervalInMinutes || data.timeStepMinutes) {
+                  stepGuess = Number(data.step || data.durationStep || data.intervalInMinutes
+                    || data.timeStepMinutes) || stepGuess;
                 }
               }
               if (maxM >= 20) window.__parkingV2TariffMax = maxM;
@@ -2223,6 +2233,11 @@ enum BookingFormPrefill {
             return /\\/v2\\/parking\\/api\\/tariff\\/options/i.test(String(url || ''));
           }
 
+          function isV2ZonePricingUrl(url) {
+            return /\\/v2\\/parking\\/api\\/pricing\\/first-hour/i.test(String(url || ''))
+              || /\\/v2\\/parking\\/api\\/areas\\/country-and-area-no/i.test(String(url || ''));
+          }
+
           function installZoneFetchHook() {
             if (window.__parkingZoneFetchHooked) return;
             window.__parkingZoneFetchHooked = true;
@@ -2246,6 +2261,9 @@ enum BookingFormPrefill {
                           cacheV2TariffOptionsPayload(data);
                         }).catch(function() {});
                       }
+                      if (isV2ZonePricingUrl(url) && res && res.ok) {
+                        markV2ZonePricingReady();
+                      }
                     } catch (e) {}
                     return res;
                   });
@@ -2262,10 +2280,14 @@ enum BookingFormPrefill {
               XMLHttpRequest.prototype.send = function() {
                 var xhr = this;
                 var url = xhr.__parkingZoneUrl || '';
-                if (isOnStreetZonesSearchUrl(url) || isV2TariffOptionsUrl(url)) {
+                if (isOnStreetZonesSearchUrl(url) || isV2TariffOptionsUrl(url) || isV2ZonePricingUrl(url)) {
                   xhr.addEventListener('load', function() {
                     try {
                       if (xhr.status < 200 || xhr.status >= 300) return;
+                      if (isV2ZonePricingUrl(url)) {
+                        markV2ZonePricingReady();
+                        return;
+                      }
                       var data = JSON.parse(xhr.responseText || 'null');
                       if (isOnStreetZonesSearchUrl(url)) cacheZonesSearchPayload(data, 'xhr');
                       if (isV2TariffOptionsUrl(url)) cacheV2TariffOptionsPayload(data);
@@ -3376,7 +3398,54 @@ enum BookingFormPrefill {
             return null;
           }
 
+          function v2DurationOptionSelected(el) {
+            if (!el) return false;
+            try {
+              if (el.getAttribute('aria-checked') === 'true') return true;
+              if (el.getAttribute('aria-pressed') === 'true') return true;
+              if (el.getAttribute('aria-selected') === 'true') return true;
+              if (el.getAttribute('data-state') === 'checked' || el.getAttribute('data-state') === 'on') return true;
+              var cls = String(el.className || '').toLowerCase();
+              if (/\\b(selected|checked|active|is-selected|is-active)\\b/.test(cls)) return true;
+            } catch (eSel) {}
+            return false;
+          }
+
+          function readV2FlexiblePickerMinutes() {
+            var hourNodes = document.querySelectorAll(
+              '[data-testid^=\"duration-flexible-hours-option-\"], [data-pmtest-id^=\"duration-flexible-hours-option-\"]'
+            );
+            var minNodes = document.querySelectorAll(
+              '[data-testid^=\"duration-flexible-minutes-option-\"], [data-pmtest-id^=\"duration-flexible-minutes-option-\"]'
+            );
+            if (!hourNodes.length && !minNodes.length) return null;
+            var hours = null;
+            var mins = null;
+            var i;
+            for (i = 0; i < hourNodes.length; i++) {
+              var hEl = hourNodes[i];
+              var hTid = (hEl.getAttribute('data-testid') || hEl.getAttribute('data-pmtest-id') || '');
+              var hMatch = hTid.match(/duration-flexible-hours-option-(\\d+)/i);
+              if (!hMatch || !visible(hEl)) continue;
+              if (v2DurationOptionSelected(hEl)) hours = parseInt(hMatch[1], 10);
+            }
+            for (i = 0; i < minNodes.length; i++) {
+              var mEl = minNodes[i];
+              var mTid = (mEl.getAttribute('data-testid') || mEl.getAttribute('data-pmtest-id') || '');
+              var mMatch = mTid.match(/duration-flexible-minutes-option-(\\d+)/i);
+              if (!mMatch || !visible(mEl)) continue;
+              if (v2DurationOptionSelected(mEl)) mins = parseInt(mMatch[1], 10);
+            }
+            // Default UI is 0h + 20m when nothing is aria-marked yet.
+            if (hours == null && mins == null) return 20;
+            if (hours == null) hours = 0;
+            if (mins == null) mins = Number(window.__parkingV2TariffMin) || 20;
+            return hours * 60 + mins;
+          }
+
           function readV2ShownDurationMinutes() {
+            var flexible = readV2FlexiblePickerMinutes();
+            if (flexible != null && flexible >= 20) return flexible;
             var sel = document.querySelector(
               '[data-testid*=\"duration\"][aria-valuenow], [data-testid*=\"duration\"] input,'
               + ' [data-testid=\"session-summary-duration-value\"], input[type=\"range\"], [role=\"spinbutton\"]'
@@ -3396,10 +3465,88 @@ enum BookingFormPrefill {
             for (var i = 0; i < Math.min(nodes.length, 80); i++) {
               var el = nodes[i];
               if (!visible(el)) continue;
+              var tid = ((el.getAttribute('data-testid') || '') + ' ' + (el.getAttribute('data-pmtest-id') || '')).toLowerCase();
+              if (/hours-option|minutes-option|continue|price|ends/.test(tid)) continue;
               var mins = parseV2DurationLabel(el.innerText || el.textContent || '');
               if (mins != null && mins >= 20 && mins <= 24 * 60 && mins > best) best = mins;
             }
             return best >= 20 ? best : null;
+          }
+
+          function clickV2FlexibleDurationOption(kind, value) {
+            var tid = kind === 'hours'
+              ? ('duration-flexible-hours-option-' + value)
+              : ('duration-flexible-minutes-option-' + value);
+            var el = document.querySelector(
+              '[data-testid=\"' + tid + '\"], [data-pmtest-id=\"' + tid + '\"]'
+            );
+            if (!el || !visible(el)) return false;
+            if (v2DurationOptionSelected(el)) {
+              if (kind === 'hours') window.__parkingV2FlexibleHoursTapped = value;
+              else window.__parkingV2FlexibleMinsTapped = value;
+              return false;
+            }
+            if (!click(el, { scroll: false })) return false;
+            if (kind === 'hours') window.__parkingV2FlexibleHoursTapped = value;
+            else window.__parkingV2FlexibleMinsTapped = value;
+            bridge({
+              type: 'log',
+              message: 'v2 duration ' + kind + '=' + value + ' tapped'
+            });
+            return true;
+          }
+
+          function availableV2FlexibleHourValues() {
+            var out = [];
+            var nodes = document.querySelectorAll(
+              '[data-testid^=\"duration-flexible-hours-option-\"], [data-pmtest-id^=\"duration-flexible-hours-option-\"]'
+            );
+            for (var i = 0; i < nodes.length; i++) {
+              var tid = (nodes[i].getAttribute('data-testid') || nodes[i].getAttribute('data-pmtest-id') || '');
+              var m = tid.match(/duration-flexible-hours-option-(\\d+)/i);
+              if (m && visible(nodes[i])) out.push(parseInt(m[1], 10));
+            }
+            return out;
+          }
+
+          function availableV2FlexibleMinuteValues() {
+            var out = [];
+            var nodes = document.querySelectorAll(
+              '[data-testid^=\"duration-flexible-minutes-option-\"], [data-pmtest-id^=\"duration-flexible-minutes-option-\"]'
+            );
+            for (var i = 0; i < nodes.length; i++) {
+              var tid = (nodes[i].getAttribute('data-testid') || nodes[i].getAttribute('data-pmtest-id') || '');
+              var m = tid.match(/duration-flexible-minutes-option-(\\d+)/i);
+              if (m && visible(nodes[i])) out.push(parseInt(m[1], 10));
+            }
+            return out;
+          }
+
+          function planV2FlexibleDuration(target) {
+            var hoursAvail = availableV2FlexibleHourValues();
+            var minsAvail = availableV2FlexibleMinuteValues();
+            if (!hoursAvail.length && !minsAvail.length) return null;
+            var bestH = 0;
+            var bestM = minsAvail.length ? minsAvail[0] : 20;
+            var bestTotal = -1;
+            var hi, mi, h, m, total;
+            if (!hoursAvail.length) hoursAvail = [0];
+            if (!minsAvail.length) minsAvail = [0];
+            for (hi = 0; hi < hoursAvail.length; hi++) {
+              h = hoursAvail[hi];
+              for (mi = 0; mi < minsAvail.length; mi++) {
+                m = minsAvail[mi];
+                total = h * 60 + m;
+                if (total < 20 || total > target) continue;
+                if (total > bestTotal) {
+                  bestTotal = total;
+                  bestH = h;
+                  bestM = m;
+                }
+              }
+            }
+            if (bestTotal < 20) return null;
+            return { hours: bestH, minutes: bestM, total: bestTotal };
           }
 
           function findV2DurationBumpButton(dir) {
@@ -3411,7 +3558,7 @@ enum BookingFormPrefill {
               var tid = ((el.getAttribute('data-testid') || '') + ' ' + (el.getAttribute('data-pmtest-id') || '')).toLowerCase();
               var label = ((el.getAttribute('aria-label') || '') + ' ' + (el.innerText || el.textContent || '')).toLowerCase();
               var key = norm(label);
-              if (/continue|back|cancel|close|apple|sign|log|payment|vehicle/.test(tid + ' ' + label)) continue;
+              if (/continue|back|cancel|close|apple|sign|log|payment|vehicle|flexible/.test(tid + ' ' + label)) continue;
               if (wantInc) {
                 if (/increase|increment|add[-_]?time|more[-_]?time|plus|step-?up/.test(tid)
                     || key === '+' || key === '＋' || key === '›' || key === '>'
@@ -3433,6 +3580,34 @@ enum BookingFormPrefill {
               bridge({ type: 'log', message: 'v2 duration already ' + shown + 'm (cap=' + target + 'm)' });
               return false;
             }
+
+            // Live FE (build 79 hooks): duration-flexible-hours-option-{0..4} + minutes-option-{20,40}.
+            var plan = planV2FlexibleDuration(target);
+            if (plan) {
+              if (clickV2FlexibleDurationOption('hours', plan.hours)) return true;
+              if (clickV2FlexibleDurationOption('minutes', plan.minutes)) return true;
+              var after = readV2ShownDurationMinutes();
+              if (after != null && after === plan.total) {
+                bridge({
+                  type: 'log',
+                  message: 'v2 duration flexible set ' + plan.total + 'm (' + plan.hours + 'h' + plan.minutes + 'm, cap=' + target + 'm)'
+                });
+                return false;
+              }
+              // Options exist but selection state unread — still treat plan as applied after taps.
+              if (window.__parkingV2FlexiblePlanAt
+                  && (Date.now() - window.__parkingV2FlexiblePlanAt) < 4000
+                  && window.__parkingV2FlexiblePlanTotal === plan.total) {
+                return false;
+              }
+              window.__parkingV2FlexiblePlanAt = Date.now();
+              window.__parkingV2FlexiblePlanTotal = plan.total;
+              bridge({
+                type: 'log',
+                message: 'v2 duration flexible plan ' + plan.hours + 'h' + plan.minutes + 'm (cap=' + target + 'm)'
+              });
+            }
+
             if (shown != null && shown > target) {
               var dec = findV2DurationBumpButton('dec');
               if (dec && click(dec, { scroll: false })) {
@@ -3441,7 +3616,6 @@ enum BookingFormPrefill {
               }
             }
 
-            // Prefer bumping + until target — duration page is usually a stepper, not chips.
             if (shown == null || shown < target) {
               var inc = findV2DurationBumpButton('inc');
               if (inc && click(inc, { scroll: false })) {
@@ -3474,33 +3648,29 @@ enum BookingFormPrefill {
               }
             }
 
-            // Chip / option fallback — interactive nodes only (build 78 clicked a 0m div/span).
-            var nodes = document.querySelectorAll(
-              'button, [role=\"option\"], [role=\"radio\"], [role=\"button\"], label'
+            return false;
+          }
+
+          function clickV2DurationContinue() {
+            var btn = document.querySelector(
+              '[data-testid=\"duration-continue-button\"], [data-pmtest-id=\"duration-continue-button\"]'
             );
-            var best = null;
-            var bestMins = -1;
-            for (var i = 0; i < Math.min(nodes.length, 200); i++) {
-              var el = nodes[i];
-              if (!visible(el)) continue;
-              var tid = ((el.getAttribute('data-testid') || '') + ' ' + (el.getAttribute('data-pmtest-id') || '')).toLowerCase();
-              if (/continue|back|cancel|close|apple|payment|vehicle|sign|log/.test(tid)) continue;
-              var raw = String(el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
-              if (!raw || raw.length > 40) continue;
-              var mins = parseV2DurationLabel(raw);
-              if (mins == null || isNaN(mins) || mins < 20) continue;
-              if (mins > target) continue;
-              if (shown != null && mins <= shown) continue;
-              if (mins > bestMins) {
-                bestMins = mins;
-                best = el;
+            if (btn && visible(btn)) {
+              var now = Date.now();
+              if (window.__parkingV2ContinueAt && (now - window.__parkingV2ContinueAt) < 2200) return false;
+              var ariaDisabled = btn.getAttribute('aria-disabled') === 'true';
+              if (btn.disabled || ariaDisabled) {
+                if (!forceClickDisabled(btn)) return false;
+                bridge({ type: 'log', message: 'v2 duration Continue forced' });
+              } else if (!click(btn, { scroll: false })) {
+                return false;
+              } else {
+                bridge({ type: 'log', message: 'v2 duration Continue tapped' });
               }
-            }
-            if (best && click(best, { scroll: false })) {
-              bridge({ type: 'log', message: 'v2 duration picked ' + bestMins + 'm (cap=' + target + 'm)' });
+              window.__parkingV2ContinueAt = now;
               return true;
             }
-            return false;
+            return clickV2PrimaryContinue(/^(continue|next|confirm)$/i);
           }
 
           function v2ConfirmApplePaySelected() {
@@ -3577,9 +3747,119 @@ enum BookingFormPrefill {
             return false;
           }
 
-          function v2GuestErrorVisible() {
-            var t = norm(document.body ? String(document.body.innerText || '') : '');
-            return /anerroroccurred|somethingwentwrong|were sorry/.test(t);
+          function v2ErrorVisible() {
+            // Full-page / sheet error with Try again (map/hub/guest crash).
+            var tryBtn = findByText('button, a, [role=\"button\"]', /^tryagain$/);
+            if (tryBtn && visible(tryBtn)) return true;
+            var title = document.querySelector(
+              '[data-testid=\"error-overlay-title\"], [data-pmtest-id=\"error-overlay-title\"]'
+            );
+            if (title && visible(title)) {
+              var t = norm((title.innerText || title.textContent || '')
+                + ' ' + (document.body ? document.body.innerText : ''));
+              if (/anerroroccurred|somethingwentwrong|were sorry/.test(t)) return true;
+            }
+            return false;
+          }
+
+          function dismissV2ErrorOverlay() {
+            var now = Date.now();
+            if (window.__parkingV2ErrorCloseAt && (now - window.__parkingV2ErrorCloseAt) < 2000) return false;
+            var btn = document.querySelector(
+              '[data-testid=\"error-overlay-close-button\"], [data-pmtest-id=\"error-overlay-close-button\"],'
+              + ' [data-testid=\"action-overlay-close-button\"], [data-pmtest-id=\"action-overlay-close-button\"]'
+            );
+            if (!btn || !visible(btn)) {
+              var title = document.querySelector(
+                '[data-testid=\"error-overlay-title\"], [data-pmtest-id=\"error-overlay-title\"]'
+              );
+              if (title && visible(title)) {
+                btn = findByText('button, a, [role=\"button\"]', /^close$/);
+              }
+            }
+            if (!btn || !visible(btn)) return false;
+            if (!click(btn, { scroll: false })) return false;
+            window.__parkingV2ErrorCloseAt = now;
+            bridge({ type: 'log', message: 'v2 error overlay closed' });
+            return true;
+          }
+
+          function v2GuestTermsChecked() {
+            var input = document.querySelector(
+              '[data-testid=\"terms-checkbox-control-input\"], [data-pmtest-id=\"terms-checkbox-control-input\"],'
+              + ' #terms-checkbox-control-input, [data-testid=\"terms-checkbox\"] input[type=\"checkbox\"]'
+            );
+            if (input) return !!input.checked || input.getAttribute('aria-checked') === 'true';
+            var box = document.querySelector(
+              '[data-testid=\"terms-checkbox-control\"], [data-pmtest-id=\"terms-checkbox-control\"],'
+              + ' [data-testid=\"terms-checkbox\"], [data-pmtest-id=\"terms-checkbox\"]'
+            );
+            return !!(box && isCheckedControl(box));
+          }
+
+          function checkV2GuestTerms() {
+            if (v2GuestTermsChecked()) return false;
+            var now = Date.now();
+            if (window.__parkingV2TermsAt && (now - window.__parkingV2TermsAt) < 1200) return false;
+            var candidates = [
+              document.querySelector('[data-testid=\"terms-checkbox-control-input\"], [data-pmtest-id=\"terms-checkbox-control-input\"]'),
+              document.querySelector('[data-testid=\"terms-checkbox-control-box\"], [data-pmtest-id=\"terms-checkbox-control-box\"]'),
+              document.querySelector('[data-testid=\"terms-checkbox-control\"], [data-pmtest-id=\"terms-checkbox-control\"]'),
+              document.querySelector('[data-testid=\"terms-checkbox-label\"], [data-pmtest-id=\"terms-checkbox-label\"]'),
+              document.querySelector('[data-testid=\"terms-checkbox\"], [data-pmtest-id=\"terms-checkbox\"]')
+            ];
+            for (var i = 0; i < candidates.length; i++) {
+              var el = candidates[i];
+              if (!el) continue;
+              var clickable = el;
+              if (!visible(el) && el.querySelector) {
+                var inner = el.querySelector('input[type=\"checkbox\"], [role=\"checkbox\"]');
+                if (inner && visible(inner)) clickable = inner;
+                else continue;
+              } else if (!visible(el)) {
+                continue;
+              }
+              if (clickable.matches && clickable.matches('input[type=\"checkbox\"]')) {
+                try {
+                  clickable.click();
+                  if (!clickable.checked) {
+                    clickable.checked = true;
+                    clickable.dispatchEvent(new Event('input', { bubbles: true }));
+                    clickable.dispatchEvent(new Event('change', { bubbles: true }));
+                  }
+                } catch (e0) {}
+              } else {
+                click(clickable, { scroll: false });
+              }
+              window.__parkingV2TermsAt = now;
+              bridge({ type: 'log', message: 'v2 guest terms checkbox tapped' });
+              return true;
+            }
+            return false;
+          }
+
+          function clickV2GuestContinue() {
+            var now = Date.now();
+            if (window.__parkingV2ContinueAt && (now - window.__parkingV2ContinueAt) < 2200) return false;
+            var btn = document.querySelector(
+              '[data-testid=\"guest-registration-continue-button\"], [data-pmtest-id=\"guest-registration-continue-button\"]'
+            );
+            if (!btn || !visible(btn)) {
+              btn = findByText('button, [role=\"button\"]', /^continue$/);
+            }
+            if (!btn || !visible(btn)) return false;
+            var ariaDisabled = btn.getAttribute('aria-disabled') === 'true';
+            if (btn.disabled || ariaDisabled) {
+              if (!v2GuestTermsChecked()) return false;
+              if (!forceClickDisabled(btn)) return false;
+              bridge({ type: 'log', message: 'v2 guest Continue forced' });
+            } else if (!click(btn, { scroll: false })) {
+              return false;
+            } else {
+              bridge({ type: 'log', message: 'v2 guest Continue tapped' });
+            }
+            window.__parkingV2ContinueAt = now;
+            return true;
           }
 
           function clickV2TryAgain() {
@@ -3589,7 +3869,7 @@ enum BookingFormPrefill {
             if (!btn || !visible(btn)) return false;
             if (!click(btn, { scroll: false })) return false;
             window.__parkingV2TryAgainAt = now;
-            bridge({ type: 'log', message: 'v2 guest Try again tapped' });
+            bridge({ type: 'log', message: 'v2 Try again tapped path=' + (location.pathname || '') });
             return true;
           }
 
@@ -3605,6 +3885,33 @@ enum BookingFormPrefill {
                 if (m2) window.__parkingV2AreaNo = decodeURIComponent(m2[1]);
               }
             } catch (eRem) {}
+          }
+
+          function markV2ZonePricingReady() {
+            window.__parkingV2ZonePricingReady = true;
+          }
+
+          function v2ZoneDetailsReady() {
+            var key = String(location.pathname || '') + String(location.search || '');
+            if (window.__parkingV2ZoneDetailsKey !== key) {
+              window.__parkingV2ZoneDetailsKey = key;
+              window.__parkingV2ZoneDetailsAt = Date.now();
+              window.__parkingV2ZonePricingReady = false;
+            }
+            // Park here / Continue must be on screen.
+            var park = findByText('button, a, [role=\"button\"]', /^parkhere$|^park here$|continueasaguest|continue as a guest/);
+            if (!park || !visible(park)) return false;
+            var elapsed = Date.now() - (window.__parkingV2ZoneDetailsAt || 0);
+            // Wait for first-hour pricing (or ~2.8s) — rushing Park here caused guest \"An error occurred\".
+            if (window.__parkingV2ZonePricingReady || elapsed >= 2800) return true;
+            if (elapsed >= 1200) {
+              bridge({
+                type: 'log',
+                message: 'v2 zone-details waiting settle ms=' + elapsed
+                  + ' pricing=' + (!!window.__parkingV2ZonePricingReady)
+              });
+            }
+            return false;
           }
 
           function recoverV2ZoneDetails() {
@@ -3638,10 +3945,30 @@ enum BookingFormPrefill {
               });
             }
 
+            // ParkMobile error sheet can appear on guest, map, or hub — not only guest-registration.
+            if (v2ErrorVisible()) {
+              if (clickV2TryAgain()) {
+                return { status: 'advanced', filled: 0, action: 'errorRetry' };
+              }
+              if (dismissV2ErrorOverlay()) {
+                return { status: 'advanced', filled: 0, action: 'errorDismiss' };
+              }
+              if (recoverV2ZoneDetails()) {
+                return { status: 'advanced', filled: 0, action: 'v2RecoverZone' };
+              }
+              return { status: 'waiting', filled: 0, action: 'awaitErrorRetry' };
+            }
+            if (dismissV2ErrorOverlay()) {
+              return { status: 'advanced', filled: 0, action: 'errorDismiss' };
+            }
+
             if (step === 'zoneDetails') {
+              if (!v2ZoneDetailsReady()) {
+                return { status: 'waiting', filled: 0, action: 'awaitZoneDetails' };
+              }
               // Replaces old Confirm Zone pause — continue into guest checkout.
               if (clickV2PrimaryContinue(/continueasaguest|continue as a guest|continue as guest|^(continue|next|park|start)$/i)
-                  || clickV2PrimaryContinue(/^(continue|next)$/i)) {
+                  || clickV2PrimaryContinue(/parkhere|^park here$|^(continue|next)$/i)) {
                 return { status: 'advanced', filled: 0, action: 'zoneDetailsContinue' };
               }
               return { status: 'waiting', filled: 0, action: 'awaitZoneDetails' };
@@ -3649,13 +3976,6 @@ enum BookingFormPrefill {
 
             if (step === 'guestRegistration') {
               logContactDiagnostics();
-              if (v2GuestErrorVisible()) {
-                if (clickV2TryAgain()) {
-                  return { status: 'advanced', filled: 0, action: 'guestRetry' };
-                }
-                // Do not force Continue under the error sheet — that dumped us to /v2/parking hub.
-                return { status: 'waiting', filled: 0, action: 'awaitContact' };
-              }
               var emailEl = firstVisible(emailInputSelector());
               if (!emailEl) {
                 return { status: 'waiting', filled: 0, action: 'awaitContact' };
@@ -3667,18 +3987,15 @@ enum BookingFormPrefill {
               if (contactJustFilled()) {
                 return { status: 'waiting', filled: 0, action: 'awaitContact' };
               }
-              if (clickV2PrimaryContinue(/^(continue|next)$/i)
-                  || clickParkMobileContactContinue()) {
-                return { status: 'advanced', filled: 0, action: 'contactContinue' };
+              // Terms checkbox required before guest-registration-continue-button enables.
+              if (checkV2GuestTerms()) {
+                return { status: 'advanced', filled: 0, action: 'guestTerms' };
               }
-              // Enable + force Continue once email matches BookingConfig.
-              if (cfg.email && norm(String(emailEl.value || '')) === norm(cfg.email)) {
-                var cont = findByText('button, [role=\"button\"]', /^continue$/);
-                if (cont && visible(cont) && forceClickDisabled(cont)) {
-                  window.__parkingV2ContinueAt = Date.now();
-                  bridge({ type: 'log', message: 'v2 guest Continue forced after email' });
-                  return { status: 'advanced', filled: 0, action: 'contactContinue' };
-                }
+              if (!v2GuestTermsChecked()) {
+                return { status: 'waiting', filled: 0, action: 'awaitGuestTerms' };
+              }
+              if (clickV2GuestContinue()) {
+                return { status: 'advanced', filled: 0, action: 'contactContinue' };
               }
               return { status: 'waiting', filled: 0, action: 'awaitContact' };
             }
@@ -3699,13 +4016,21 @@ enum BookingFormPrefill {
                 window.__parkingV2DurationPath = location.pathname;
                 window.__parkingV2DurationSet = false;
                 window.__parkingV2DurationBumps = 0;
+                window.__parkingV2FlexiblePlanAt = 0;
+                window.__parkingV2FlexiblePlanTotal = 0;
               }
               var targetDur = v2DurationTargetMinutes();
               var shownDur = readV2ShownDurationMinutes();
+              var planDur = planV2FlexibleDuration(targetDur);
+              // After both flexible chips tapped, accept planned total even if aria state is unread.
+              if (planDur && window.__parkingV2FlexibleHoursTapped === planDur.hours
+                  && window.__parkingV2FlexibleMinsTapped === planDur.minutes) {
+                shownDur = planDur.total;
+              }
               // Only Continue after the UI actually shows ~target (build 78 marked set after a 0m click).
               if (v2DurationNearTarget(shownDur, targetDur)) {
                 window.__parkingV2DurationSet = true;
-                if (clickV2PrimaryContinue(/^(continue|next|confirm)$/i)) {
+                if (clickV2DurationContinue()) {
                   return { status: 'advanced', filled: 1, action: 'zoneContinue' };
                 }
                 return { status: 'waiting', filled: 1, action: 'awaitDuration' };

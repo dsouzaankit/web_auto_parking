@@ -48,8 +48,9 @@ On checkout / login-to-checkout pages, the WebView will:
 
 1. Phone and PC on the same Wi‑Fi; allow **Local Network** when prompted.
 2. Open **`http://<phone-ip>:8765/`** (prefer IP on Windows), **`/logs.txt`**, **`/xhr.txt`**, **`/hooks.txt`**, or **`/html`**.
-3. Toggle under **Garages → LAN logs**. Bonjour name: `webautoparking._http._tcp`.
-4. Log file is **cleared on each app launch** (cold start), then starts with `App launch v… build …`.
+3. Toggle under **Garages → LAN logs**. Bonjour name: `webautoparking._http._tcp` (browser/docs only — Windows often cannot resolve `.local`).
+4. From the PC: **`py -3 ai/parkmobile_zone_xhr/_pull_live.py`** — scans the local `/24` for `:8765` serving Parking LAN logs (no hardcoded phone IP). Optional override: `--base http://<phone-ip>:8765` or `PARKING_LAN_BASE` after a failed scan. Writes `live_logs.txt`, `live_xhr.txt`, `live_hooks.txt`.
+5. Log file is **cleared on each app launch** (cold start), then starts with `App launch v… build …`.
 
 Useful log lines: `Prefill inject`, `Prefill JS {"status":"advanced|filled|waiting",...}`, `action":"awaitAddressSearch|awaitManualZoneIdSubmit|awaitZonePrefill|awaitManualZoneSubmit|awaitZoneAuth|zoneContinue|setDuration|searchZonesMode|geo|pickZone|reserve|guest|awaitSignIn|autofillHint|loginSubmit|setTimes|awaitCheckout|saveContinue|vehicleAdd|vehicleConfirm|contactEdit|contactContinue|awaitContact|applePay|acknowledge|awaitZoneDetails|awaitDuration"` (ParkChirp Keychain: bridge `parkChirpKeychain`), plus bridge hints like `checkoutDiag`, `v2ParkingDiag`, `vehicleDiag`, `spotHeroVehicle`, `paymentDiag`, `contactDiag` (`bound=` is the real matched tag), `prefillError`, `contact Edit tapped`, `Save & Continue tapped` / `forced`, `Continue with Apple Pay tapped` / `forced`, `v2 Add vehicle tapped`, `SpotHero vehicle open btn=…`, `vehicle Continue tapped btn=…`, `HTML dump reason=… /html`.
 

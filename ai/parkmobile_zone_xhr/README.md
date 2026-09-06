@@ -51,8 +51,14 @@ Duration options (Hoboken): hours `0/1/2` (zone max may be lower), minutes inclu
 
 ## What to export for refinement
 
-When you run the NJ `/search` flow in-app, pull `http://<phone-ip>:8765/xhr.txt` and confirm:
+When you run the NJ `/search` flow in-app, pull live captures:
+
+```text
+py -3 ai/parkmobile_zone_xhr/_pull_live.py
+```
+
+That LAN-scans for `:8765` (or `--base http://<phone-ip>:8765`) and writes `live_xhr.txt` / `live_logs.txt` / `live_hooks.txt`. Confirm:
 
 1. SPA `zones/search` **200** after Get user location (not our 422 fetch)
 2. `pickZone #… internal=…` in logs
-3. Navigation to `/zone/start?internalZoneCode=…`
+3. Navigation into Zone checkout (`/zone/start?…` or `/v2/parking/…`)
