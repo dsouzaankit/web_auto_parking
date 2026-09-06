@@ -1,7 +1,8 @@
 import Foundation
 import UIKit
 
-/// Guest ParkMobile receipts live on `/sessions/{uuid}` — not in the native app Activity list.
+/// Guest ParkMobile receipts live on `/sessions/{uuid}` (legacy) or
+/// `/v2/parking/session/guest/{uuid}` (2026 Zone SPA) — not in the native app Activity list.
 struct SavedParkingSession: Codable, Identifiable, Equatable, Hashable {
     var uuid: String
     var urlString: String
@@ -70,14 +71,19 @@ final class ParkingSessionStore: ObservableObject {
     nonisolated static func isProtectedURL(_ url: URL?) -> Bool {
         guard let path = url?.path.lowercased() else { return false }
         return path.contains("/sessions/")
+            || path.contains("/v2/parking/session/")
             || path.contains("/zone/confirmation")
             || path.contains("/zone/receipt")
             || path.contains("/zone/review") && path.contains("confirmation")
     }
 
-    /// Canonical `/sessions/{uuid}` link when the WebView is on the post-checkout timer page.
+    /// Canonical timer/receipt link when the WebView is on the post-checkout page.
     nonisolated static func copyableTimerURL(_ url: URL?) -> URL? {
         guard let url, let uuid = uuid(in: url) else { return nil }
+        let path = url.path.lowercased()
+        if path.contains("/v2/parking/session/") {
+            return URL(string: "https://app.parkmobile.io/v2/parking/session/guest/\(uuid.lowercased())")
+        }
         return URL(string: "https://app.parkmobile.io/sessions/\(uuid.lowercased())")
     }
 
@@ -113,7 +119,8 @@ final class ParkingSessionStore: ObservableObject {
         }
 
         let interesting = xhrURL.contains("ondemand-guest-purchase")
-            || xhrURL.contains("/v2/parking/")
+            || xhrURL.contains("/v2/parking/api/order/purchase")
+            || xhrURL.contains("/v2/parking/api/parking/")
             || xhrURL.localizedCaseInsensitiveContains("parking_uuid")
         guard interesting else { return }
         guard let uuid = Self.uuid(inJSON: responseBody) ?? Self.uuid(in: responseBody) else { return }
@@ -164,6 +171,31 @@ final class ParkingSessionStore: ObservableObject {
                 }
             }
         }
+        // v2 Zone SPA: POST /order/purchase + GET /api/parking/{uuid}
+        if xhrURL.contains("/v2/parking/api/order/purchase") || xhrURL.contains("/v2/parking/api/parking/") {
+            if let req = Self.jsonObject(requestBody) {
+                if let plate = req["licensePlate"] as? String, !plate.isEmpty {
+                    pendingPlate = plate
+                }
+                if let areaNo = req["areaNo"] as? String, !areaNo.isEmpty {
+                    pendingZone = Self.preferredZoneCode(incoming: areaNo, existing: pendingZone)
+                }
+            }
+            if let root = Self.jsonObject(responseBody) {
+                let data = (root["data"] as? [String: Any]) ?? root
+                if let plate = data["carLicenseNumber"] as? String, !plate.isEmpty {
+                    pendingPlate = plate
+                }
+                if let signage = data["signageAreaCode"] as? String, !signage.isEmpty {
+                    pendingZone = Self.preferredZoneCode(incoming: signage, existing: pendingZone)
+                }
+                if let price = data["priceInclVat"] as? Double {
+                    pendingAmount = String(format: "$%.2f", price)
+                } else if let price = data["priceInclVat"] as? NSNumber {
+                    pendingAmount = String(format: "$%.2f", price.doubleValue)
+                }
+            }
+        }
     }
 
     private func remember(
@@ -176,8 +208,7 @@ final class ParkingSessionStore: ObservableObject {
         stopLabel: String? = nil
     ) {
         let key = uuid.lowercased()
-        let link = URL(string: "https://app.parkmobile.io/sessions/\(key)")
-            ?? fallbackURL
+        let link = Self.preferredReceiptURL(uuid: key, fallbackURL: fallbackURL)
         guard let link else { return }
 
         var session = SavedParkingSession(
@@ -211,6 +242,18 @@ final class ParkingSessionStore: ObservableObject {
             "Parking session captured uuid=\(key) zone=\(session.zoneCode ?? "-") " +
             "plate=\(session.plate ?? "-") url=\(link.absoluteString)"
         )
+    }
+
+    private static func preferredReceiptURL(uuid: String, fallbackURL: URL?) -> URL? {
+        if let fallbackURL {
+            let path = fallbackURL.path.lowercased()
+            if path.contains("/v2/parking/session/") || path.contains("/sessions/") {
+                return fallbackURL
+            }
+        }
+        // Prefer the live v2 guest manage-session URL when we only have a uuid from XHR.
+        return URL(string: "https://app.parkmobile.io/v2/parking/session/guest/\(uuid)")
+            ?? URL(string: "https://app.parkmobile.io/sessions/\(uuid)")
     }
 
     private func load() {
@@ -259,7 +302,8 @@ final class ParkingSessionStore: ObservableObject {
     }
 
     nonisolated private static func uuid(in text: String) -> String? {
-        let pattern = #"(?:/sessions/|parking_uuid"?\s*[:=]\s*"?)([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"#
+        // Legacy `/sessions/{uuid}`, v2 `/session/guest/{uuid}`, and `/api/parking/{uuid}`.
+        let pattern = #"(?:/sessions/|/session/(?:guest/)?|/api/parking/|parking_uuid"?\s*[:=]\s*"?)([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         guard let match = regex.firstMatch(in: text, range: range),
@@ -268,11 +312,22 @@ final class ParkingSessionStore: ObservableObject {
         return String(text[swiftRange])
     }
 
+    private static func looksLikeUUID(_ value: String) -> Bool {
+        value.count >= 32 && value.contains("-")
+    }
+
     private static func uuid(inJSON text: String) -> String? {
         guard let obj = jsonObject(text) else { return uuid(in: text) }
-        for key in ["parking_uuid", "parkingUuid"] {
-            if let value = obj[key] as? String, value.contains("-"), value.count >= 32 {
+        for key in ["parking_uuid", "parkingUuid", "uuid", "id"] {
+            if let value = obj[key] as? String, looksLikeUUID(value) {
                 return value
+            }
+        }
+        if let data = obj["data"] as? [String: Any] {
+            for key in ["id", "parkingId", "parkingUuid", "parking_uuid", "uuid"] {
+                if let value = data[key] as? String, looksLikeUUID(value) {
+                    return value
+                }
             }
         }
         return uuid(in: text)
@@ -280,11 +335,19 @@ final class ParkingSessionStore: ObservableObject {
 
     private static func timeLabels(inJSON text: String) -> (start: String?, stop: String?) {
         guard let obj = jsonObject(text) else { return (nil, nil) }
-        let startRaw = (obj["parking_start_time_utc"] as? String)
+        let data = (obj["data"] as? [String: Any]) ?? obj
+        let startRaw = (data["parking_start_time_utc"] as? String)
+            ?? (data["startTimeUtc"] as? String)
+            ?? (data["start"] as? String)
+            ?? (obj["parking_start_time_utc"] as? String)
             ?? (obj["startTimeUtc"] as? String)
-        let stopRaw = (obj["parking_stop_time_utc"] as? String)
+        let stopRaw = (data["parking_stop_time_utc"] as? String)
+            ?? (data["stopTimeUtc"] as? String)
+            ?? (data["end"] as? String)
+            ?? (obj["parking_stop_time_utc"] as? String)
             ?? (obj["stopTimeUtc"] as? String)
-        let offset = (obj["parking_start_time_offset"] as? Int)
+        let offset = (data["parking_start_time_offset"] as? Int)
+            ?? (obj["parking_start_time_offset"] as? Int)
             ?? (obj["parking_stop_time_offset"] as? Int)
             ?? -240
         return (formatWall(startRaw, offsetMinutes: offset), formatWall(stopRaw, offsetMinutes: offset))
