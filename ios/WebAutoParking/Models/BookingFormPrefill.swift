@@ -394,7 +394,7 @@ enum BookingFormPrefill {
 
           function emailInputSelector() {
             // Tag-restrict pmtest: [data-pmtest-id*=\"email\"] also matches edit-email-step-button.
-            return '#email, input[name=\"email\"], input[type=\"email\"], input[autocomplete=\"email\"], input[autocomplete=\"username\"], input[data-testid=\"email-input\"], [data-testid=\"email-input\"], input[data-pmtest-id*=\"email\"], input[id*=\"email\" i], input[name*=\"email\" i], textarea[name=\"email\"], textarea[id*=\"email\" i]';
+            return '#email, #guest-registration-email-input, input[name=\"email\"], input[type=\"email\"], input[autocomplete=\"email\"], input[autocomplete=\"username\"], input[data-testid=\"email-input\"], input[data-testid=\"guest-registration-email-input\"], [data-testid=\"email-input\"], [data-testid=\"guest-registration-email-input\"], input[data-pmtest-id*=\"email\"], input[id*=\"email\" i], input[name*=\"email\" i], textarea[name=\"email\"], textarea[id*=\"email\" i]';
           }
 
           function phoneInputSelector() {
@@ -1507,8 +1507,11 @@ enum BookingFormPrefill {
 
           function isApplePayContinueCandidate(el) {
             if (!el || isNativeApplePayBuyButton(el)) return false;
-            var pm = (el.getAttribute('data-pmtest-id') || '').toLowerCase();
-            if (pm === 'complete-purchase-button' || pm === 'apple-login-button') return false;
+            var pm = ((el.getAttribute('data-pmtest-id') || '') + ' ' + (el.getAttribute('data-testid') || '')).toLowerCase();
+            // Garage "Continue with Apple Pay" only — never v2 confirm purchase / summary row.
+            if (pm.indexOf('complete-purchase-button') !== -1 || pm.indexOf('apple-login-button') !== -1) return false;
+            if (pm.indexOf('apple-pay-button') !== -1) return false;
+            if (pm.indexOf('session-summary-payment') !== -1) return false;
             if (applePayMarkImg(el)) {
               var t0 = textOf(el);
               if (/signinwithapple/.test(t0) || /addcredit|debitcard/.test(t0)) return false;
@@ -1534,9 +1537,8 @@ enum BookingFormPrefill {
               var img = applePayMarkImg(roots[s]);
               if (img) {
                 var host = img.closest('button, a, [role=\"button\"]');
-                if (host && !isNativeApplePayBuyButton(host)) {
-                  var pm = (host.getAttribute('data-pmtest-id') || '').toLowerCase();
-                  if (pm !== 'complete-purchase-button' && pm !== 'apple-login-button') return host;
+                if (host && !isNativeApplePayBuyButton(host) && isApplePayContinueCandidate(host)) {
+                  return host;
                 }
               }
               var nodes = roots[s].querySelectorAll('button, a, [role=\"button\"]');
@@ -1716,6 +1718,12 @@ enum BookingFormPrefill {
             // ParkMobile only — SpotHero / ParkChirp payment left alone.
             var onPM = /parkmobile\\.io/i.test(location.hostname || '');
             if (!onPM) return false;
+            // v2 confirm with Apple Pay already chosen — user taps pay; do not keep looping.
+            if (typeof isParkMobileV2ParkingPath === 'function' && isParkMobileV2ParkingPath()
+                && typeof v2ParkingStep === 'function' && v2ParkingStep() === 'confirm'
+                && typeof v2ConfirmApplePaySelected === 'function' && v2ConfirmApplePaySelected()) {
+              return false;
+            }
             if (wantsApplePay() && findContinueWithApplePayButton()) return true;
             if (wantsApplePay() && paymentDetailsVisible() && !window.__parkingApplePayAt) return true;
             if (acknowledgeNeedsCheck()) return true;
@@ -2155,6 +2163,66 @@ enum BookingFormPrefill {
           }
 
           /// Cache SPA /api/zones/search — ParkMobile uses XHR; our own fetch often 422s.
+          /// Also cache v2 tariff/options max/step for duration targeting.
+          function cacheV2TariffOptionsPayload(data) {
+            try {
+              var list = null;
+              if (Array.isArray(data)) list = data;
+              else if (data && Array.isArray(data.options)) list = data.options;
+              else if (data && Array.isArray(data.tariffs)) list = data.tariffs;
+              else if (data && Array.isArray(data.durations)) list = data.durations;
+              var maxM = -1;
+              var stepGuess = 0;
+              var minsSeen = [];
+              function consider(mins) {
+                if (mins == null || isNaN(mins)) return;
+                var n = Number(mins);
+                if (n < 20 || n > 24 * 60) return;
+                minsSeen.push(n);
+                if (n > maxM) maxM = n;
+              }
+              if (list) {
+                for (var i = 0; i < list.length; i++) {
+                  var row = list[i] || {};
+                  consider(row.durationInMinutes || row.duration_in_minutes || row.minutes
+                    || row.duration || row.value || row.maxDurationInMinutes);
+                }
+              }
+              if (data && typeof data === 'object') {
+                consider(data.maxDurationInMinutes || data.maxParkingDurationInMinutes
+                  || data.maximumDurationInMinutes || data.maxDuration);
+                if (data.step || data.durationStep || data.intervalInMinutes) {
+                  stepGuess = Number(data.step || data.durationStep || data.intervalInMinutes) || 0;
+                }
+              }
+              if (maxM >= 20) window.__parkingV2TariffMax = maxM;
+              if (stepGuess >= 1) window.__parkingV2TariffStep = stepGuess;
+              else if (minsSeen.length >= 2) {
+                minsSeen.sort(function(a, b) { return a - b; });
+                var diffs = {};
+                for (var d = 1; d < minsSeen.length; d++) {
+                  var diff = minsSeen[d] - minsSeen[d - 1];
+                  if (diff >= 5 && diff <= 60) diffs[diff] = (diffs[diff] || 0) + 1;
+                }
+                var bestStep = 20, bestCount = 0;
+                Object.keys(diffs).forEach(function(k) {
+                  if (diffs[k] > bestCount) { bestCount = diffs[k]; bestStep = Number(k); }
+                });
+                if (bestCount > 0) window.__parkingV2TariffStep = bestStep;
+              }
+              if (maxM >= 20) {
+                bridge({
+                  type: 'log',
+                  message: 'v2 tariff cached max=' + maxM + 'm step=' + (window.__parkingV2TariffStep || 20)
+                });
+              }
+            } catch (eTariff) {}
+          }
+
+          function isV2TariffOptionsUrl(url) {
+            return /\\/v2\\/parking\\/api\\/tariff\\/options/i.test(String(url || ''));
+          }
+
           function installZoneFetchHook() {
             if (window.__parkingZoneFetchHooked) return;
             window.__parkingZoneFetchHooked = true;
@@ -2173,6 +2241,11 @@ enum BookingFormPrefill {
                           cacheZonesSearchPayload(data, 'fetch');
                         }).catch(function() {});
                       }
+                      if (isV2TariffOptionsUrl(url) && res && res.ok && res.clone) {
+                        res.clone().json().then(function(data) {
+                          cacheV2TariffOptionsPayload(data);
+                        }).catch(function() {});
+                      }
                     } catch (e) {}
                     return res;
                   });
@@ -2189,11 +2262,13 @@ enum BookingFormPrefill {
               XMLHttpRequest.prototype.send = function() {
                 var xhr = this;
                 var url = xhr.__parkingZoneUrl || '';
-                if (isOnStreetZonesSearchUrl(url)) {
+                if (isOnStreetZonesSearchUrl(url) || isV2TariffOptionsUrl(url)) {
                   xhr.addEventListener('load', function() {
                     try {
                       if (xhr.status < 200 || xhr.status >= 300) return;
-                      cacheZonesSearchPayload(JSON.parse(xhr.responseText || 'null'), 'xhr');
+                      var data = JSON.parse(xhr.responseText || 'null');
+                      if (isOnStreetZonesSearchUrl(url)) cacheZonesSearchPayload(data, 'xhr');
+                      if (isV2TariffOptionsUrl(url)) cacheV2TariffOptionsPayload(data);
                     } catch (e) {}
                   });
                 }
@@ -3265,66 +3340,294 @@ enum BookingFormPrefill {
             return true;
           }
 
-          function pickV2DurationMinutes() {
+          function v2DurationTargetMinutes() {
             var maxMin = Math.max(20, Number(cfg.maxDurationMinutes) || 160);
-            // Live tariff options: minimum 20, step 20, max often 240.
-            var target = Math.floor(maxMin / 20) * 20;
+            var step = Number(window.__parkingV2TariffStep) || 20;
+            if (step < 1) step = 20;
+            var apiMax = Number(window.__parkingV2TariffMax);
+            if (!isNaN(apiMax) && apiMax >= 20) maxMin = Math.min(maxMin, apiMax);
+            // Live tariff options: minimum 20, step often 20, max often 240.
+            var target = Math.floor(maxMin / step) * step;
             if (target < 20) target = 20;
-            var nodes = document.querySelectorAll('button, [role=\"option\"], [role=\"radio\"], label, div, span, li');
-            var best = null;
-            var bestMins = -1;
-            for (var i = 0; i < Math.min(nodes.length, 250); i++) {
+            return target;
+          }
+
+          function v2DurationNearTarget(shown, target) {
+            if (shown == null || isNaN(shown) || shown < 20) return false;
+            // Allow one tariff step of undershoot (e.g. 160 want → 140/160 ok).
+            return shown >= Math.max(20, target - 19) && shown <= target + 19;
+          }
+
+          function parseV2DurationLabel(raw) {
+            var n = String(raw || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+            if (!n || n.length > 48) return null;
+            // Strip trailing \"Ends …\" clock clutter, then reject remaining clock-only strings.
+            n = n.replace(/\\bends\\b.*$/i, '').trim();
+            if (!n || /\\d{1,2}:\\d{2}/.test(n)) return null;
+            var hhmm = n.match(/(\\d+)\\s*h(?:ours?)?\\s*(\\d+)\\s*m/);
+            if (hhmm) return parseInt(hhmm[1], 10) * 60 + parseInt(hhmm[2], 10);
+            var compact = n.match(/^(\\d+)\\s*h(\\d+)\\s*m\\b/);
+            if (compact) return parseInt(compact[1], 10) * 60 + parseInt(compact[2], 10);
+            var hOnly = n.match(/^(\\d+)\\s*(?:h|hr|hrs|hour|hours)\\b/);
+            if (hOnly) return parseInt(hOnly[1], 10) * 60;
+            // \"20m\", \"20 min\", \"20 minutes\"
+            var mOnly = n.match(/^(\\d+)\\s*(?:m|min|mins|minutes)\\b/);
+            if (mOnly) return parseInt(mOnly[1], 10);
+            return null;
+          }
+
+          function readV2ShownDurationMinutes() {
+            var sel = document.querySelector(
+              '[data-testid*=\"duration\"][aria-valuenow], [data-testid*=\"duration\"] input,'
+              + ' [data-testid=\"session-summary-duration-value\"], input[type=\"range\"], [role=\"spinbutton\"]'
+            );
+            if (sel && visible(sel)) {
+              var av = sel.getAttribute('aria-valuenow') || sel.value
+                || (sel.innerText || sel.textContent || '');
+              var fromAttr = parseInt(String(av || '').replace(/[^0-9]/g, ''), 10);
+              if (!isNaN(fromAttr) && fromAttr >= 20 && fromAttr <= 24 * 60) return fromAttr;
+              var fromLabel = parseV2DurationLabel(av);
+              if (fromLabel != null && fromLabel >= 20) return fromLabel;
+            }
+            var nodes = document.querySelectorAll(
+              '[data-testid*=\"duration\"], [data-testid*=\"tariff\"], h1, h2, h3, strong, [class*=\"duration\" i]'
+            );
+            var best = -1;
+            for (var i = 0; i < Math.min(nodes.length, 80); i++) {
               var el = nodes[i];
               if (!visible(el)) continue;
+              var mins = parseV2DurationLabel(el.innerText || el.textContent || '');
+              if (mins != null && mins >= 20 && mins <= 24 * 60 && mins > best) best = mins;
+            }
+            return best >= 20 ? best : null;
+          }
+
+          function findV2DurationBumpButton(dir) {
+            var wantInc = dir === 'inc';
+            var nodes = document.querySelectorAll('button, [role=\"button\"], [aria-label]');
+            for (var i = 0; i < nodes.length; i++) {
+              var el = nodes[i];
+              if (!visible(el)) continue;
+              var tid = ((el.getAttribute('data-testid') || '') + ' ' + (el.getAttribute('data-pmtest-id') || '')).toLowerCase();
+              var label = ((el.getAttribute('aria-label') || '') + ' ' + (el.innerText || el.textContent || '')).toLowerCase();
+              var key = norm(label);
+              if (/continue|back|cancel|close|apple|sign|log|payment|vehicle/.test(tid + ' ' + label)) continue;
+              if (wantInc) {
+                if (/increase|increment|add[-_]?time|more[-_]?time|plus|step-?up/.test(tid)
+                    || key === '+' || key === '＋' || key === '›' || key === '>'
+                    || /^increase|^increment|add\\s*time|more\\s*time|\\+$/.test(label)) return el;
+              } else {
+                if (/decrease|decrement|less|minus|step-?down/.test(tid)
+                    || key === '-' || key === '−' || key === '–' || key === '‹' || key === '<'
+                    || /^decrease|^decrement|less\\s*time/.test(label)) return el;
+              }
+            }
+            return null;
+          }
+
+          /// Adjust duration toward target. Does NOT mark complete — caller checks shown minutes.
+          function pickV2DurationMinutes() {
+            var target = v2DurationTargetMinutes();
+            var shown = readV2ShownDurationMinutes();
+            if (v2DurationNearTarget(shown, target)) {
+              bridge({ type: 'log', message: 'v2 duration already ' + shown + 'm (cap=' + target + 'm)' });
+              return false;
+            }
+            if (shown != null && shown > target) {
+              var dec = findV2DurationBumpButton('dec');
+              if (dec && click(dec, { scroll: false })) {
+                bridge({ type: 'log', message: 'v2 duration - from ' + shown + 'm toward ' + target + 'm' });
+                return true;
+              }
+            }
+
+            // Prefer bumping + until target — duration page is usually a stepper, not chips.
+            if (shown == null || shown < target) {
+              var inc = findV2DurationBumpButton('inc');
+              if (inc && click(inc, { scroll: false })) {
+                var bumps = (window.__parkingV2DurationBumps || 0) + 1;
+                window.__parkingV2DurationBumps = bumps;
+                bridge({
+                  type: 'log',
+                  message: 'v2 duration + from ' + (shown != null ? shown : '?') + 'm toward ' + target + 'm (bump=' + bumps + ')'
+                });
+                return true;
+              }
+            }
+
+            var range = document.querySelector('input[type=\"range\"]');
+            if (range && visible(range)) {
+              var maxAttr = parseInt(range.max || '240', 10);
+              var minAttr = parseInt(range.min || '20', 10);
+              var stepAttr = parseInt(range.step || '20', 10) || 20;
+              var want = Math.min(target, isNaN(maxAttr) ? target : maxAttr);
+              want = Math.max(want, isNaN(minAttr) ? 20 : minAttr);
+              want = Math.floor(want / stepAttr) * stepAttr;
+              if (String(range.value) !== String(want)) {
+                try {
+                  range.value = String(want);
+                  range.dispatchEvent(new Event('input', { bubbles: true }));
+                  range.dispatchEvent(new Event('change', { bubbles: true }));
+                  bridge({ type: 'log', message: 'v2 duration range set ' + want + 'm (cap=' + target + 'm)' });
+                  return true;
+                } catch (eRange) {}
+              }
+            }
+
+            // Chip / option fallback — interactive nodes only (build 78 clicked a 0m div/span).
+            var nodes = document.querySelectorAll(
+              'button, [role=\"option\"], [role=\"radio\"], [role=\"button\"], label'
+            );
+            var best = null;
+            var bestMins = -1;
+            for (var i = 0; i < Math.min(nodes.length, 200); i++) {
+              var el = nodes[i];
+              if (!visible(el)) continue;
+              var tid = ((el.getAttribute('data-testid') || '') + ' ' + (el.getAttribute('data-pmtest-id') || '')).toLowerCase();
+              if (/continue|back|cancel|close|apple|payment|vehicle|sign|log/.test(tid)) continue;
               var raw = String(el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
               if (!raw || raw.length > 40) continue;
-              var mins = null;
-              var hm = raw.match(/^(\\d+)\\s*(?:min|mins|minutes)\\b/i);
-              var hh = raw.match(/^(\\d+)\\s*(?:h|hr|hrs|hour|hours)\\b/i);
-              var hhmm = raw.match(/^(\\d+)\\s*h(?:ours?)?\\s*(\\d+)\\s*m/i);
-              if (hm) mins = parseInt(hm[1], 10);
-              else if (hhmm) mins = parseInt(hhmm[1], 10) * 60 + parseInt(hhmm[2], 10);
-              else if (hh) mins = parseInt(hh[1], 10) * 60;
-              if (mins == null || isNaN(mins)) continue;
+              var mins = parseV2DurationLabel(raw);
+              if (mins == null || isNaN(mins) || mins < 20) continue;
               if (mins > target) continue;
+              if (shown != null && mins <= shown) continue;
               if (mins > bestMins) {
                 bestMins = mins;
                 best = el;
               }
             }
-            if (!best) return false;
-            if (!click(best, { scroll: false })) return false;
-            bridge({ type: 'log', message: 'v2 duration picked ' + bestMins + 'm (cap=' + target + 'm)' });
-            window.__parkingV2DurationSet = true;
-            return true;
-          }
-
-          function clickV2ApplePay() {
-            var now = Date.now();
-            if (window.__parkingApplePayAt && (now - window.__parkingApplePayAt) < 2500) return false;
-            var nodes = document.querySelectorAll('button, [role=\"button\"], [role=\"radio\"], label, div');
-            for (var i = 0; i < nodes.length; i++) {
-              var el = nodes[i];
-              if (!visible(el)) continue;
-              if (isNativeApplePayBuyButton(el)) continue;
-              var tid = ((el.getAttribute('data-testid') || '') + ' ' + (el.getAttribute('data-pmtest-id') || '')).toLowerCase();
-              var label = ((el.innerText || el.textContent || '') + ' ' + (el.getAttribute('aria-label') || '')).toLowerCase();
-              var img = el.querySelector && el.querySelector('img[alt*=\"apple\" i], img[src*=\"applepay\" i]');
-              var hit = /apple.?pay/.test(label) || /apple.?pay/.test(tid) || !!img;
-              if (!hit) continue;
-              if (/complete purchase|buy with apple|pay now|confirm payment/.test(label)) continue;
-              if (!click(el, { scroll: false })) continue;
-              window.__parkingApplePayAt = now;
-              bridge({ type: 'log', message: 'v2 Apple Pay option tapped' });
+            if (best && click(best, { scroll: false })) {
+              bridge({ type: 'log', message: 'v2 duration picked ' + bestMins + 'm (cap=' + target + 'm)' });
               return true;
             }
             return false;
+          }
+
+          function v2ConfirmApplePaySelected() {
+            var payBtn = document.querySelector(
+              '[data-testid=\"session-summary-payment-button\"], [data-pmtest-id=\"session-summary-payment-button\"]'
+            );
+            if (payBtn && visible(payBtn)) {
+              var label = ((payBtn.getAttribute('aria-label') || '') + ' ' + (payBtn.innerText || payBtn.textContent || '')).toLowerCase();
+              if (/apple\\s*pay/.test(label)) return true;
+            }
+            var title = document.querySelector(
+              '[data-testid=\"session-summary-payment-title\"], [data-pmtest-id=\"session-summary-payment-title\"]'
+            );
+            if (title && visible(title) && /apple\\s*pay/i.test(title.innerText || title.textContent || '')) {
+              return true;
+            }
+            return false;
+          }
+
+          function isV2ApplePayPurchaseButton(el) {
+            if (!el) return false;
+            if (isNativeApplePayBuyButton(el)) return true;
+            var tid = ((el.getAttribute('data-testid') || '') + ' ' + (el.getAttribute('data-pmtest-id') || '')).toLowerCase();
+            // data-testid=apple-pay-button is the pay CTA on confirm — never auto-tap.
+            if (tid.indexOf('apple-pay-button') !== -1) return true;
+            if (tid.indexOf('complete-purchase-button') !== -1) return true;
+            var label = ((el.innerText || el.textContent || '') + ' ' + (el.getAttribute('aria-label') || '')).toLowerCase();
+            if (/complete purchase|buy with apple|pay now|confirm payment/.test(label)) return true;
+            return false;
+          }
+
+          /// Select Apple Pay as payment method only. Never taps the purchase CTA.
+          function selectV2ApplePayMethod() {
+            var now = Date.now();
+            if (window.__parkingApplePayAt && (now - window.__parkingApplePayAt) < 2500) return false;
+            if (v2ConfirmApplePaySelected()) return false;
+
+            var overlay = document.querySelector(
+              '[data-testid=\"session-summary-payment-overlay\"], [data-pmtest-id=\"session-summary-payment-overlay\"]'
+            );
+            var overlayOpen = overlay && visible(overlay);
+            if (!overlayOpen) {
+              var summary = document.querySelector(
+                '[data-testid=\"session-summary-payment-button\"], [data-pmtest-id=\"session-summary-payment-button\"]'
+              );
+              if (summary && visible(summary) && click(summary, { scroll: false })) {
+                window.__parkingApplePayAt = now;
+                bridge({ type: 'log', message: 'v2 payment overlay opened' });
+                return true;
+              }
+            }
+
+            var roots = [];
+            if (overlayOpen) roots.push(overlay);
+            roots.push(document);
+            for (var s = 0; s < roots.length; s++) {
+              var nodes = roots[s].querySelectorAll('button, [role=\"button\"], [role=\"radio\"], label');
+              for (var i = 0; i < nodes.length; i++) {
+                var el = nodes[i];
+                if (!visible(el)) continue;
+                if (isV2ApplePayPurchaseButton(el)) continue;
+                var tid = ((el.getAttribute('data-testid') || '') + ' ' + (el.getAttribute('data-pmtest-id') || '')).toLowerCase();
+                if (tid.indexOf('session-summary-payment-button') !== -1) continue;
+                if (tid.indexOf('remove') !== -1 || tid.indexOf('add-payment') !== -1) continue;
+                var label = ((el.innerText || el.textContent || '') + ' ' + (el.getAttribute('aria-label') || '')).toLowerCase();
+                if (!/apple\\s*pay/.test(label) && tid.indexOf('apple') === -1) continue;
+                if (/change payment|remove|add payment|cancel|close/.test(label)) continue;
+                if (!click(el, { scroll: false })) continue;
+                window.__parkingApplePayAt = now;
+                bridge({ type: 'log', message: 'v2 Apple Pay method selected' });
+                return true;
+              }
+            }
+            return false;
+          }
+
+          function v2GuestErrorVisible() {
+            var t = norm(document.body ? String(document.body.innerText || '') : '');
+            return /anerroroccurred|somethingwentwrong|were sorry/.test(t);
+          }
+
+          function clickV2TryAgain() {
+            var now = Date.now();
+            if (window.__parkingV2TryAgainAt && (now - window.__parkingV2TryAgainAt) < 2500) return false;
+            var btn = findByText('button, a, [role=\"button\"]', /^tryagain$/);
+            if (!btn || !visible(btn)) return false;
+            if (!click(btn, { scroll: false })) return false;
+            window.__parkingV2TryAgainAt = now;
+            bridge({ type: 'log', message: 'v2 guest Try again tapped' });
+            return true;
+          }
+
+          function rememberV2AreaNo() {
+            try {
+              var q = String(location.search || '');
+              var m = q.match(/[?&]areaNo=([^&]+)/i);
+              if (m && m[1]) window.__parkingV2AreaNo = decodeURIComponent(m[1]);
+              var path = String(location.pathname || '');
+              var pm = path.match(/\\/v2\\/parking\\/zone-details/i);
+              if (!window.__parkingV2AreaNo && pm) {
+                var m2 = q.match(/[?&]areaNo=([^&]+)/i);
+                if (m2) window.__parkingV2AreaNo = decodeURIComponent(m2[1]);
+              }
+            } catch (eRem) {}
+          }
+
+          function recoverV2ZoneDetails() {
+            var area = window.__parkingV2AreaNo;
+            if (!area) return false;
+            var path = String(location.pathname || '').toLowerCase();
+            var onHub = path === '/v2/parking' || path === '/v2/parking/'
+              || path.indexOf('/v2/parking/zones/map') !== -1;
+            if (!onHub) return false;
+            var now = Date.now();
+            if (window.__parkingV2RecoverAt && (now - window.__parkingV2RecoverAt) < 4000) return false;
+            window.__parkingV2RecoverAt = now;
+            var url = '/v2/parking/zone-details?areaNo=' + encodeURIComponent(area);
+            bridge({ type: 'log', message: 'v2 recover zone-details areaNo=' + area });
+            try { location.assign(url); } catch (e0) { location.href = url; }
+            return true;
           }
 
           function advanceParkMobileV2Parking() {
             if (dismissCookieBanner()) {
               return { status: 'advanced', filled: 0, action: 'cookie' };
             }
+            rememberV2AreaNo();
             var step = v2ParkingStep();
             var nowDiag = Date.now();
             if (!window.__parkingV2DiagAt || (nowDiag - window.__parkingV2DiagAt) > 8000) {
@@ -3346,6 +3649,17 @@ enum BookingFormPrefill {
 
             if (step === 'guestRegistration') {
               logContactDiagnostics();
+              if (v2GuestErrorVisible()) {
+                if (clickV2TryAgain()) {
+                  return { status: 'advanced', filled: 0, action: 'guestRetry' };
+                }
+                // Do not force Continue under the error sheet — that dumped us to /v2/parking hub.
+                return { status: 'waiting', filled: 0, action: 'awaitContact' };
+              }
+              var emailEl = firstVisible(emailInputSelector());
+              if (!emailEl) {
+                return { status: 'waiting', filled: 0, action: 'awaitContact' };
+              }
               var filled = fillContactFields();
               if (filled > 0) {
                 return { status: 'waiting', filled: filled, action: 'contactPartial' };
@@ -3358,8 +3672,7 @@ enum BookingFormPrefill {
                 return { status: 'advanced', filled: 0, action: 'contactContinue' };
               }
               // Enable + force Continue once email matches BookingConfig.
-              var email = firstVisible(emailInputSelector());
-              if (email && cfg.email && norm(String(email.value || '')) === norm(cfg.email)) {
+              if (cfg.email && norm(String(emailEl.value || '')) === norm(cfg.email)) {
                 var cont = findByText('button, [role=\"button\"]', /^continue$/);
                 if (cont && visible(cont) && forceClickDisabled(cont)) {
                   window.__parkingV2ContinueAt = Date.now();
@@ -3382,27 +3695,47 @@ enum BookingFormPrefill {
             }
 
             if (step === 'duration') {
-              if (!window.__parkingV2DurationSet && pickV2DurationMinutes()) {
+              if (window.__parkingV2DurationPath !== location.pathname) {
+                window.__parkingV2DurationPath = location.pathname;
+                window.__parkingV2DurationSet = false;
+                window.__parkingV2DurationBumps = 0;
+              }
+              var targetDur = v2DurationTargetMinutes();
+              var shownDur = readV2ShownDurationMinutes();
+              // Only Continue after the UI actually shows ~target (build 78 marked set after a 0m click).
+              if (v2DurationNearTarget(shownDur, targetDur)) {
+                window.__parkingV2DurationSet = true;
+                if (clickV2PrimaryContinue(/^(continue|next|confirm)$/i)) {
+                  return { status: 'advanced', filled: 1, action: 'zoneContinue' };
+                }
+                return { status: 'waiting', filled: 1, action: 'awaitDuration' };
+              }
+              window.__parkingV2DurationSet = false;
+              if (pickV2DurationMinutes()) {
                 return { status: 'advanced', filled: 1, action: 'setDuration' };
               }
-              if (clickV2PrimaryContinue(/^(continue|next|confirm)$/i)) {
-                return { status: 'advanced', filled: 0, action: 'zoneContinue' };
-              }
-              return { status: 'waiting', filled: window.__parkingV2DurationSet ? 1 : 0, action: 'awaitDuration' };
+              return { status: 'waiting', filled: 0, action: 'awaitDuration' };
             }
 
             if (step === 'confirm') {
-              if (clickV2ApplePay() || clickContinueWithApplePay()) {
+              logPaymentDiagnostics();
+              if (v2ConfirmApplePaySelected()) {
+                bridge({ type: 'log', message: 'v2 Apple Pay already selected — await user pay (apple-pay-button)' });
+                return { status: 'filled', filled: 0, action: 'awaitCheckout' };
+              }
+              // Method select only — never clickContinueWithApplePay (that hits apple-pay-button).
+              if (selectV2ApplePayMethod()) {
                 return { status: 'advanced', filled: 0, action: 'applePay' };
               }
               if (checkAcknowledgeBoxes()) {
                 return { status: 'advanced', filled: 0, action: 'acknowledge' };
               }
-              // Stop before native Complete Purchase / Pay.
-              if (window.__parkingApplePayAt || window.__parkingAckAt) {
-                return { status: 'filled', filled: 0, action: 'done' };
-              }
               return { status: 'waiting', filled: 0, action: 'paymentPending' };
+            }
+
+            // Hub / map after a guest error — jump back into zone-details.
+            if (recoverV2ZoneDetails()) {
+              return { status: 'advanced', filled: 0, action: 'v2RecoverZone' };
             }
 
             // Unknown /v2/parking/* — keep waiting rather than false-done.

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct WebAutoParkingApp: App {
@@ -20,12 +21,20 @@ struct WebAutoParkingApp: App {
             ContentView()
                 .environmentObject(store)
                 .onAppear {
+                    // Keep screen awake while Parking is foregrounded (checkout can take minutes).
+                    UIApplication.shared.isIdleTimerDisabled = true
                     // Start after a scene is visible so Local Network permission can prompt.
                     LANLogServer.ensureRunning()
                 }
                 .onChange(of: scenePhase) { _, phase in
-                    if phase == .active {
+                    switch phase {
+                    case .active:
+                        UIApplication.shared.isIdleTimerDisabled = true
                         LANLogServer.ensureRunning()
+                    case .inactive, .background:
+                        UIApplication.shared.isIdleTimerDisabled = false
+                    @unknown default:
+                        break
                     }
                 }
         }
