@@ -54,9 +54,13 @@ final class AttemptedZoneStore: ObservableObject {
         if let code = queryValue("internalzonecode", in: pageURL) {
             upsert(internalCode: code, signageCode: nil)
         }
+        if let code = queryValue("areano", in: pageURL) {
+            upsert(internalCode: code, signageCode: nil)
+        }
         if path.contains("/zone/start") || path.contains("/zone/duration")
             || path.contains("/zone/auth") || path.contains("/zone/vehicle")
-            || path.contains("/zone/payment") || path.contains("/zone/review") {
+            || path.contains("/zone/payment") || path.contains("/zone/review")
+            || path.contains("/v2/parking/zone-details") {
             remember(xhrURL: pageURL.absoluteString, responseBody: "")
         }
     }
@@ -65,6 +69,9 @@ final class AttemptedZoneStore: ObservableObject {
         let lower = xhrURL.lowercased()
         if Self.shouldIgnore(lower) { return }
         if let code = firstMatch(#"internalzonecode=(\d{7,})"#, in: lower) {
+            upsert(internalCode: code, signageCode: nil)
+        }
+        if let code = firstMatch(#"[?&]areano=(\d{7,})"#, in: lower) {
             upsert(internalCode: code, signageCode: nil)
         }
         if let code = firstMatch(#"/zoneoptions/(\d{7,})"#, in: lower) {
@@ -83,10 +90,14 @@ final class AttemptedZoneStore: ObservableObject {
         lower.contains("/zones/search")
             || lower.contains("/search/transient")
             || lower.contains("/sessions/")
-            || lower.contains("/v2/parking")
             || lower.contains("ondemand-guest-purchase")
             || lower.contains("/zone/confirmation")
             || lower.contains("/zone/receipt")
+            || lower.contains("/v2/parking/api/")
+            || lower.contains("/v2/parking/confirm")
+            || lower.contains("/v2/parking/duration")
+            || lower.contains("/v2/parking/guest-registration")
+            || lower.contains("/v2/parking/add-vehicle")
     }
 
     func remove(id: String) {

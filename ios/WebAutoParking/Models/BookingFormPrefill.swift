@@ -49,6 +49,7 @@ enum BookingFormPrefill {
             || haystack.contains("facilities")
             || haystack.contains("search")
             || path.contains("/zone")
+            || path.contains("/v2/parking")
             || path.contains("login")
             || path.contains("signin")
             || path.contains("sign-in")
@@ -435,6 +436,7 @@ enum BookingFormPrefill {
             var q = location.search || '';
             return /\\/checkout/i.test(path)
               || /\\/zone\\/(auth|vehicle|payment|contact|confirm|review|summary)/i.test(path)
+              || /\\/v2\\/parking/i.test(path)
               || /(?:^|[?&])checkoutState=/i.test(q);
           }
 
@@ -657,7 +659,7 @@ enum BookingFormPrefill {
 
           function vehiclePlateInput() {
             var el = firstVisible(
-              '#vrn, input[name=\"vrn\"], #licensePlate, #license-plate, #plate, input[name*=\"plate\" i], input[id*=\"plate\" i], input[name*=\"license\" i], input[name*=\"lpn\" i], [data-testid=\"Vehicle-input-plate\"], [data-pmtest-id*=\"vehicle\"][data-pmtest-id*=\"plate\"], [data-pmtest-id*=\"license\"]'
+              '#vehicle-form-license-plate-input, [data-testid=\"vehicle-form-license-plate-input\"], #vrn, input[name=\"vrn\"], #licensePlate, #license-plate, #plate, input[name*=\"plate\" i], input[id*=\"plate\" i], input[name*=\"license\" i], input[name*=\"lpn\" i], [data-testid=\"Vehicle-input-plate\"], [data-pmtest-id*=\"vehicle\"][data-pmtest-id*=\"plate\"], [data-pmtest-id*=\"license\"]'
             );
             if (el) return el;
             // Last resort: maxlength input near a plate/vehicle label (avoid random autocomplete=off fields).
@@ -2415,7 +2417,7 @@ enum BookingFormPrefill {
                 label: z.locationName || z.supplierName || z.name
                   ? String(z.locationName || z.supplierName || z.name)
                   : ('Zone # ' + (zoneID || internal)),
-                href: '/zone/start?internalZoneCode=' + encodeURIComponent(internal),
+                href: '/v2/parking/zone-details?areaNo=' + encodeURIComponent(internal),
                 el: null,
                 distanceMeters: dist,
                 order: i
@@ -2527,7 +2529,7 @@ enum BookingFormPrefill {
               window.__parkingNearestZoneNavigated = true;
               window.__parkingNearestZoneFilled = true;
               try {
-                location.href = '/zone/start?internalZoneCode=' + encodeURIComponent(candidate.internalZoneCode);
+                location.href = '/v2/parking/zone-details?areaNo=' + encodeURIComponent(candidate.internalZoneCode);
                 bridge({ type: 'log', message: 'navigate nearest internalZoneCode=' + candidate.internalZoneCode });
                 return 'navigated';
               } catch (e) {}
@@ -3105,10 +3107,319 @@ enum BookingFormPrefill {
             return false;
           }
 
+          /// New ParkMobile Zone checkout SPA (2026): /v2/parking/zone-details → guest-registration →
+          /// add-vehicle → duration → confirm. Old /zone/start Confirm Zone flow still exists as fallback.
+          function isParkMobileV2ParkingPath() {
+            return /\\/v2\\/parking/i.test(location.pathname || '');
+          }
+
+          function v2ParkingStep() {
+            var path = (location.pathname || '').toLowerCase();
+            if (path.indexOf('/v2/parking/zone-details') !== -1) return 'zoneDetails';
+            if (path.indexOf('/v2/parking/guest-registration') !== -1) return 'guestRegistration';
+            if (path.indexOf('/v2/parking/add-vehicle') !== -1) return 'addVehicle';
+            if (path.indexOf('/v2/parking/duration') !== -1) return 'duration';
+            if (path.indexOf('/v2/parking/confirm') !== -1) return 'confirm';
+            if (path.indexOf('/v2/parking/payment') !== -1) return 'confirm';
+            return 'other';
+          }
+
+          function clickV2PrimaryContinue(extraAllow) {
+            var now = Date.now();
+            if (window.__parkingV2ContinueAt && (now - window.__parkingV2ContinueAt) < 2200) return false;
+            var allow = extraAllow || /^(continue|next|park|start|select|confirm)$/;
+            var nodes = document.querySelectorAll('button, a[role=\"button\"], [role=\"button\"], input[type=\"submit\"]');
+            var best = null;
+            for (var i = 0; i < nodes.length; i++) {
+              var el = nodes[i];
+              if (!visible(el)) continue;
+              var tid = ((el.getAttribute('data-testid') || '') + ' ' + (el.getAttribute('data-pmtest-id') || '')).toLowerCase();
+              var label = ((el.innerText || el.textContent || '') + ' ' + (el.getAttribute('aria-label') || '')
+                + ' ' + (el.value || '')).replace(/\\s+/g, ' ').trim();
+              var key = norm(label);
+              if (!key && !/continue|submit|save|confirm/.test(tid)) continue;
+              if (/sign ?up|log ?in|sign ?in|create account|apple pay|complete purchase|buy with|back|cancel|close|filter/i.test(label)) continue;
+              if (/header-signup|header-login|signup|signin/.test(tid)) continue;
+              var ok = false;
+              if (allow.test(key) || allow.test(label)) ok = true;
+              if (/continue|submit|save|confirm|next/.test(tid)) ok = true;
+              if (/continueasaguest|continue as a guest|continue as guest/.test(key)) ok = true;
+              if (!ok) continue;
+              best = el;
+              if (/continueasaguest|guest/.test(key) || key === 'continue') break;
+            }
+            if (!best) return false;
+            var ariaDisabled = best.getAttribute('aria-disabled') === 'true';
+            if (best.disabled || ariaDisabled) {
+              if (!forceClickDisabled(best)) return false;
+              bridge({ type: 'log', message: 'v2 Continue forced btn=' + ((best.innerText || '').trim().slice(0, 32)) });
+            } else if (!click(best, { scroll: false })) {
+              return false;
+            } else {
+              bridge({ type: 'log', message: 'v2 Continue tapped btn=' + ((best.innerText || '').trim().slice(0, 32)) });
+            }
+            window.__parkingV2ContinueAt = now;
+            return true;
+          }
+
+          function openV2SelectAndPick(selectTestId, optionPrefix, wantCode) {
+            if (!wantCode) return false;
+            var code = String(wantCode).trim().toUpperCase();
+            var shown = document.querySelector('[data-testid=\"' + selectTestId + '\"]');
+            if (shown && visible(shown)) {
+              var shownText = norm(shown.innerText || shown.textContent || '');
+              if (shownText === norm(code) || shownText.indexOf(norm(code)) !== -1) return false;
+            }
+            var optId = optionPrefix + code;
+            var opt = document.querySelector('[data-testid=\"' + optId + '\"]');
+            if (opt && visible(opt)) {
+              return click(opt, { scroll: false });
+            }
+            if (shown && visible(shown)) {
+              click(shown, { scroll: false });
+            }
+            opt = document.querySelector('[data-testid=\"' + optId + '\"]');
+            if (opt && visible(opt)) return click(opt, { scroll: false });
+            // Overlay list may use buttons with the code as text.
+            var nodes = document.querySelectorAll('[data-testid*=\"' + optionPrefix + '\"], [role=\"option\"], button, li');
+            for (var i = 0; i < nodes.length; i++) {
+              var el = nodes[i];
+              if (!visible(el)) continue;
+              var t = norm(el.innerText || el.textContent || '');
+              var tid = (el.getAttribute('data-testid') || '');
+              if (tid === optId || t === norm(code) || t.indexOf(norm(code)) === 0) {
+                return click(el, { scroll: false });
+              }
+            }
+            return false;
+          }
+
+          function fillV2AddVehicle() {
+            var filled = 0;
+            if (cfg.licensePlateNumber) {
+              var plate = firstVisible(
+                '#vehicle-form-license-plate-input, [data-testid=\"vehicle-form-license-plate-input\"]'
+              );
+              if (plate) {
+                var cur = String(plate.value || '').trim();
+                if (norm(cur) !== norm(cfg.licensePlateNumber) && setNativeValue(plate, cfg.licensePlateNumber)) {
+                  filled += 1;
+                  nudgeVehicleFormValidation(plate);
+                }
+              }
+            }
+            if (cfg.country) {
+              if (openV2SelectAndPick('vehicle-form-country-select', 'vehicle-form-country-select-option-', cfg.country)) {
+                filled += 1;
+              }
+            }
+            if (cfg.state) {
+              if (openV2SelectAndPick('vehicle-form-state-select', 'vehicle-form-state-select-option-', cfg.state)) {
+                filled += 1;
+              }
+            }
+            return filled;
+          }
+
+          function v2AddVehicleReady() {
+            var plate = firstVisible(
+              '#vehicle-form-license-plate-input, [data-testid=\"vehicle-form-license-plate-input\"]'
+            );
+            if (cfg.licensePlateNumber) {
+              if (!plate || norm(String(plate.value || '')) !== norm(cfg.licensePlateNumber)) return false;
+            } else if (!plate || !String(plate.value || '').trim()) {
+              return false;
+            }
+            if (cfg.state) {
+              var stateBtn = document.querySelector('[data-testid=\"vehicle-form-state-select\"]');
+              if (stateBtn && visible(stateBtn)) {
+                var st = norm(stateBtn.innerText || stateBtn.textContent || '');
+                if (st.indexOf(norm(cfg.state)) === -1 && !/^[a-z]{2}$/.test(st)) {
+                  // Still showing placeholder \"State/province\".
+                  if (/state|province|select/.test(st)) return false;
+                }
+              }
+            }
+            return true;
+          }
+
+          function clickV2AddVehicleSave() {
+            var now = Date.now();
+            if (window.__parkingV2VehicleSaveAt && (now - window.__parkingV2VehicleSaveAt) < 2500) return false;
+            if (!v2AddVehicleReady()) return false;
+            var btn = document.querySelector('[data-testid=\"vehicle-form-save-button\"]');
+            if (!btn || !visible(btn)) {
+              btn = findByText('button, [role=\"button\"]', /^addvehicle$|^save$|^continue$/);
+            }
+            if (!btn || !visible(btn)) return false;
+            var ariaDisabled = btn.getAttribute('aria-disabled') === 'true';
+            if (btn.disabled || ariaDisabled) {
+              if (!forceClickDisabled(btn)) return false;
+              bridge({ type: 'log', message: 'v2 Add vehicle forced' });
+            } else if (!click(btn, { scroll: false })) {
+              return false;
+            } else {
+              bridge({ type: 'log', message: 'v2 Add vehicle tapped' });
+            }
+            window.__parkingV2VehicleSaveAt = now;
+            return true;
+          }
+
+          function pickV2DurationMinutes() {
+            var maxMin = Math.max(20, Number(cfg.maxDurationMinutes) || 160);
+            // Live tariff options: minimum 20, step 20, max often 240.
+            var target = Math.floor(maxMin / 20) * 20;
+            if (target < 20) target = 20;
+            var nodes = document.querySelectorAll('button, [role=\"option\"], [role=\"radio\"], label, div, span, li');
+            var best = null;
+            var bestMins = -1;
+            for (var i = 0; i < Math.min(nodes.length, 250); i++) {
+              var el = nodes[i];
+              if (!visible(el)) continue;
+              var raw = String(el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+              if (!raw || raw.length > 40) continue;
+              var mins = null;
+              var hm = raw.match(/^(\\d+)\\s*(?:min|mins|minutes)\\b/i);
+              var hh = raw.match(/^(\\d+)\\s*(?:h|hr|hrs|hour|hours)\\b/i);
+              var hhmm = raw.match(/^(\\d+)\\s*h(?:ours?)?\\s*(\\d+)\\s*m/i);
+              if (hm) mins = parseInt(hm[1], 10);
+              else if (hhmm) mins = parseInt(hhmm[1], 10) * 60 + parseInt(hhmm[2], 10);
+              else if (hh) mins = parseInt(hh[1], 10) * 60;
+              if (mins == null || isNaN(mins)) continue;
+              if (mins > target) continue;
+              if (mins > bestMins) {
+                bestMins = mins;
+                best = el;
+              }
+            }
+            if (!best) return false;
+            if (!click(best, { scroll: false })) return false;
+            bridge({ type: 'log', message: 'v2 duration picked ' + bestMins + 'm (cap=' + target + 'm)' });
+            window.__parkingV2DurationSet = true;
+            return true;
+          }
+
+          function clickV2ApplePay() {
+            var now = Date.now();
+            if (window.__parkingApplePayAt && (now - window.__parkingApplePayAt) < 2500) return false;
+            var nodes = document.querySelectorAll('button, [role=\"button\"], [role=\"radio\"], label, div');
+            for (var i = 0; i < nodes.length; i++) {
+              var el = nodes[i];
+              if (!visible(el)) continue;
+              if (isNativeApplePayBuyButton(el)) continue;
+              var tid = ((el.getAttribute('data-testid') || '') + ' ' + (el.getAttribute('data-pmtest-id') || '')).toLowerCase();
+              var label = ((el.innerText || el.textContent || '') + ' ' + (el.getAttribute('aria-label') || '')).toLowerCase();
+              var img = el.querySelector && el.querySelector('img[alt*=\"apple\" i], img[src*=\"applepay\" i]');
+              var hit = /apple.?pay/.test(label) || /apple.?pay/.test(tid) || !!img;
+              if (!hit) continue;
+              if (/complete purchase|buy with apple|pay now|confirm payment/.test(label)) continue;
+              if (!click(el, { scroll: false })) continue;
+              window.__parkingApplePayAt = now;
+              bridge({ type: 'log', message: 'v2 Apple Pay option tapped' });
+              return true;
+            }
+            return false;
+          }
+
+          function advanceParkMobileV2Parking() {
+            if (dismissCookieBanner()) {
+              return { status: 'advanced', filled: 0, action: 'cookie' };
+            }
+            var step = v2ParkingStep();
+            var nowDiag = Date.now();
+            if (!window.__parkingV2DiagAt || (nowDiag - window.__parkingV2DiagAt) > 8000) {
+              window.__parkingV2DiagAt = nowDiag;
+              bridge({
+                type: 'log',
+                message: 'v2ParkingDiag step=' + step + ' path=' + (location.pathname || '')
+              });
+            }
+
+            if (step === 'zoneDetails') {
+              // Replaces old Confirm Zone pause — continue into guest checkout.
+              if (clickV2PrimaryContinue(/continueasaguest|continue as a guest|continue as guest|^(continue|next|park|start)$/i)
+                  || clickV2PrimaryContinue(/^(continue|next)$/i)) {
+                return { status: 'advanced', filled: 0, action: 'zoneDetailsContinue' };
+              }
+              return { status: 'waiting', filled: 0, action: 'awaitZoneDetails' };
+            }
+
+            if (step === 'guestRegistration') {
+              logContactDiagnostics();
+              var filled = fillContactFields();
+              if (filled > 0) {
+                return { status: 'waiting', filled: filled, action: 'contactPartial' };
+              }
+              if (contactJustFilled()) {
+                return { status: 'waiting', filled: 0, action: 'awaitContact' };
+              }
+              if (clickV2PrimaryContinue(/^(continue|next)$/i)
+                  || clickParkMobileContactContinue()) {
+                return { status: 'advanced', filled: 0, action: 'contactContinue' };
+              }
+              // Enable + force Continue once email matches BookingConfig.
+              var email = firstVisible(emailInputSelector());
+              if (email && cfg.email && norm(String(email.value || '')) === norm(cfg.email)) {
+                var cont = findByText('button, [role=\"button\"]', /^continue$/);
+                if (cont && visible(cont) && forceClickDisabled(cont)) {
+                  window.__parkingV2ContinueAt = Date.now();
+                  bridge({ type: 'log', message: 'v2 guest Continue forced after email' });
+                  return { status: 'advanced', filled: 0, action: 'contactContinue' };
+                }
+              }
+              return { status: 'waiting', filled: 0, action: 'awaitContact' };
+            }
+
+            if (step === 'addVehicle') {
+              var vFilled = fillV2AddVehicle();
+              if (vFilled > 0) {
+                return { status: 'waiting', filled: vFilled, action: 'vehiclePartial' };
+              }
+              if (clickV2AddVehicleSave()) {
+                return { status: 'advanced', filled: 0, action: 'vehicleConfirm' };
+              }
+              return { status: 'waiting', filled: vehiclePlateMatches() ? 1 : 0, action: 'awaitVehicle' };
+            }
+
+            if (step === 'duration') {
+              if (!window.__parkingV2DurationSet && pickV2DurationMinutes()) {
+                return { status: 'advanced', filled: 1, action: 'setDuration' };
+              }
+              if (clickV2PrimaryContinue(/^(continue|next|confirm)$/i)) {
+                return { status: 'advanced', filled: 0, action: 'zoneContinue' };
+              }
+              return { status: 'waiting', filled: window.__parkingV2DurationSet ? 1 : 0, action: 'awaitDuration' };
+            }
+
+            if (step === 'confirm') {
+              if (clickV2ApplePay() || clickContinueWithApplePay()) {
+                return { status: 'advanced', filled: 0, action: 'applePay' };
+              }
+              if (checkAcknowledgeBoxes()) {
+                return { status: 'advanced', filled: 0, action: 'acknowledge' };
+              }
+              // Stop before native Complete Purchase / Pay.
+              if (window.__parkingApplePayAt || window.__parkingAckAt) {
+                return { status: 'filled', filled: 0, action: 'done' };
+              }
+              return { status: 'waiting', filled: 0, action: 'paymentPending' };
+            }
+
+            // Unknown /v2/parking/* — keep waiting rather than false-done.
+            if (clickV2PrimaryContinue(/^(continue|next)$/i)) {
+              return { status: 'advanced', filled: 0, action: 'zoneContinue' };
+            }
+            return { status: 'waiting', filled: 0, action: 'idle' };
+          }
+
           function advanceParkMobileZone() {
             if (!isParkMobileZoneFlow() || !cfg.zoneAutomationEnabled) return null;
             installZoneFetchHook();
             ensureNativeGeolocationStub();
+
+            if (isParkMobileV2ParkingPath()) {
+              return advanceParkMobileV2Parking();
+            }
 
             // /search — SPA owns zones/search XHR; auto Park Here nearest, then stop on zone-id page.
             if (isZoneSearchPage()) {

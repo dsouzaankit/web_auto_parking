@@ -194,8 +194,9 @@ enum FixedDurationURLs {
 
     static func zoneStart(internalZoneCode: String) -> URL {
         let trimmed = internalZoneCode.trimmingCharacters(in: .whitespacesAndNewlines)
-        var components = URLComponents(string: "https://app.parkmobile.io/zone/start")!
-        components.queryItems = [URLQueryItem(name: "internalZoneCode", value: trimmed)]
+        // ParkMobile Zone checkout now lands on v2 zone-details (old /zone/start redirects there).
+        var components = URLComponents(string: "https://app.parkmobile.io/v2/parking/zone-details")!
+        components.queryItems = [URLQueryItem(name: "areaNo", value: trimmed)]
         return components.url ?? zoneStart
     }
 
