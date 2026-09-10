@@ -80,7 +80,7 @@ Known baseline snapshot: [reference.md](reference.md).
 | Renamed testid / chip | Update selectors; keep text fallback |
 | Duration options changed | Re-map hours/minutes chips + tariff `timebasedOptions`; only Continue when shown ≈ target |
 | Guest error flash | Settle wait on zone-details (pricing / ~2.8s) before **auto** Park here (Attempted); search nearest uses manual confirm; dismiss overlay / **Try again**; recover `areaNo` |
-| Wrong zone after nearest pick | After geo or address nearest pick, pause on zone-details (`awaitManualZoneConfirm`) until user taps **Park here**; Attempted jumps auto-continue |
+| Wrong zone after nearest pick | After geo/address pick, set `sessionStorage` confirm flag **before** nav, then pause on zone-details (`awaitManualZoneConfirm`); Attempted jumps (fresh WebView) auto-continue |
 | Empty Receipts after pay | Capture v2 purchase + `GET …/api/parking/{uuid}` + `/v2/parking/session/guest/{uuid}` (not only legacy `/sessions/`) |
 | Attempted polluted by pay | Ignore v2 session/purchase paths in `AttemptedZoneStore.shouldIgnore` |
 | Jump opens wrong city | Jump with **internal** `areaNo` only → `/v2/parking/zone-details?areaNo=` |

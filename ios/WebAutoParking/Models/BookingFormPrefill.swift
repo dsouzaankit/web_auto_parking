@@ -2626,8 +2626,7 @@ enum BookingFormPrefill {
               window.__parkingNearestZoneNavigated = true;
               window.__parkingNearestZoneFilled = true;
               // Geo nearest from /zone/start — pause on zone-details for manual Park here.
-              window.__parkingZoneDetailsNeedConfirm = true;
-              window.__parkingZoneDetailsConfirmLogged = false;
+              setZoneDetailsNeedConfirm(candidate.internalZoneCode);
               try {
                 location.href = '/v2/parking/zone-details?areaNo=' + encodeURIComponent(candidate.internalZoneCode);
                 bridge({ type: 'log', message: 'navigate nearest internalZoneCode=' + candidate.internalZoneCode });
@@ -3894,6 +3893,37 @@ enum BookingFormPrefill {
             window.__parkingV2ZonePricingReady = true;
           }
 
+          /// Survive full navigation from /search → zone-details (window.* is wiped on load).
+          var ZONE_DETAILS_CONFIRM_KEY = '__parkingZoneDetailsNeedConfirm';
+
+          function setZoneDetailsNeedConfirm(areaNo) {
+            window.__parkingZoneDetailsNeedConfirm = true;
+            window.__parkingZoneDetailsConfirmLogged = false;
+            try {
+              sessionStorage.setItem(ZONE_DETAILS_CONFIRM_KEY, String(areaNo || '1'));
+            } catch (eSet) {}
+          }
+
+          function clearZoneDetailsNeedConfirm() {
+            window.__parkingZoneDetailsNeedConfirm = false;
+            window.__parkingZoneDetailsConfirmLogged = false;
+            try { sessionStorage.removeItem(ZONE_DETAILS_CONFIRM_KEY); } catch (eClr) {}
+          }
+
+          function zoneDetailsNeedConfirm() {
+            if (window.__parkingZoneDetailsNeedConfirm) return true;
+            try {
+              var stored = sessionStorage.getItem(ZONE_DETAILS_CONFIRM_KEY);
+              if (!stored) return false;
+              var qm = String(location.search || '').match(/[?&]areaNo=([^&]+)/i);
+              var area = qm ? decodeURIComponent(qm[1]) : '';
+              if (!area || stored === '1') return true;
+              return String(stored) === String(area);
+            } catch (eGet) {
+              return false;
+            }
+          }
+
           function v2ZoneDetailsReady() {
             var key = String(location.pathname || '') + String(location.search || '');
             if (window.__parkingV2ZoneDetailsKey !== key) {
@@ -3969,8 +3999,8 @@ enum BookingFormPrefill {
               if (!v2ZoneDetailsReady()) {
                 return { status: 'waiting', filled: 0, action: 'awaitZoneDetails' };
               }
-              // Geo/address nearest pick sets needConfirm. Attempted jumps leave it unset → auto Park here.
-              if (window.__parkingZoneDetailsNeedConfirm) {
+              // Geo/address nearest pick sets sessionStorage (survives nav). Attempted = fresh WebView → auto.
+              if (zoneDetailsNeedConfirm()) {
                 if (!window.__parkingZoneDetailsConfirmLogged) {
                   window.__parkingZoneDetailsConfirmLogged = true;
                   var areaHint = '';
@@ -3994,7 +4024,7 @@ enum BookingFormPrefill {
             }
 
             if (step === 'guestRegistration') {
-              window.__parkingZoneDetailsNeedConfirm = false;
+              clearZoneDetailsNeedConfirm();
               logContactDiagnostics();
               var emailEl = firstVisible(emailInputSelector());
               if (!emailEl) {
@@ -4166,10 +4196,9 @@ enum BookingFormPrefill {
                 }
                 return { status: 'waiting', filled: 0, action: 'awaitZones' };
               }
+              setZoneDetailsNeedConfirm(candidate.internalZoneCode);
               if (activateNearestZone(candidate)) {
-                // Geo or address nearest — pause for manual Park here. Attempted jumps skip this flag.
-                window.__parkingZoneDetailsNeedConfirm = true;
-                window.__parkingZoneDetailsConfirmLogged = false;
+                // sessionStorage set above — must precede location.href inside activateNearestZone.
                 bridge({
                   type: 'log',
                   message: 'pickZone #' + (candidate.signageCode || candidate.zoneID)
@@ -4180,6 +4209,7 @@ enum BookingFormPrefill {
                 });
                 return { status: 'advanced', filled: 0, action: 'pickZone' };
               }
+              clearZoneDetailsNeedConfirm();
               return { status: 'waiting', filled: 0, action: 'pickZonePending' };
             }
 
