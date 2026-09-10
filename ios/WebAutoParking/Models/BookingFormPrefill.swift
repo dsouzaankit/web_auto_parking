@@ -2625,6 +2625,9 @@ enum BookingFormPrefill {
             if (isAcceptableZoneCandidate(candidate) && !window.__parkingNearestZoneNavigated) {
               window.__parkingNearestZoneNavigated = true;
               window.__parkingNearestZoneFilled = true;
+              // Geo nearest from /zone/start — pause on zone-details for manual Park here.
+              window.__parkingZoneDetailsNeedConfirm = true;
+              window.__parkingZoneDetailsConfirmLogged = false;
               try {
                 location.href = '/v2/parking/zone-details?areaNo=' + encodeURIComponent(candidate.internalZoneCode);
                 bridge({ type: 'log', message: 'navigate nearest internalZoneCode=' + candidate.internalZoneCode });
@@ -3966,7 +3969,24 @@ enum BookingFormPrefill {
               if (!v2ZoneDetailsReady()) {
                 return { status: 'waiting', filled: 0, action: 'awaitZoneDetails' };
               }
-              // Replaces old Confirm Zone pause — continue into guest checkout.
+              // Geo nearest pick: stop here so user verifies Zone # (urban GPS). Address-search
+              // picks and Attempted jumps leave __parkingZoneDetailsNeedConfirm unset/false.
+              if (window.__parkingZoneDetailsNeedConfirm) {
+                if (!window.__parkingZoneDetailsConfirmLogged) {
+                  window.__parkingZoneDetailsConfirmLogged = true;
+                  var areaHint = '';
+                  try {
+                    var qm = String(location.search || '').match(/[?&]areaNo=([^&]+)/i);
+                    if (qm) areaHint = decodeURIComponent(qm[1]);
+                  } catch (eArea) {}
+                  bridge({
+                    type: 'log',
+                    message: 'awaitManualZoneConfirm — verify Zone # then tap Park here'
+                      + (areaHint ? (' areaNo=' + areaHint) : '')
+                  });
+                }
+                return { status: 'filled', filled: 0, action: 'awaitManualZoneConfirm' };
+              }
               if (clickV2PrimaryContinue(/continueasaguest|continue as a guest|continue as guest|^(continue|next|park|start)$/i)
                   || clickV2PrimaryContinue(/parkhere|^park here$|^(continue|next)$/i)) {
                 return { status: 'advanced', filled: 0, action: 'zoneDetailsContinue' };
@@ -3975,6 +3995,8 @@ enum BookingFormPrefill {
             }
 
             if (step === 'guestRegistration') {
+              // User left zone-details (manual or auto Park here) — don't re-pause if recovered later.
+              window.__parkingZoneDetailsNeedConfirm = false;
               logContactDiagnostics();
               var emailEl = firstVisible(emailInputSelector());
               if (!emailEl) {
@@ -4093,6 +4115,8 @@ enum BookingFormPrefill {
                 if (/\\/search\\/[^/]+/i.test(searchPath)) {
                   window.__parkingDidTapGeo = true;
                   window.__parkingGeoTappedAt = Date.now();
+                  window.__parkingZoneDetailsNeedConfirm = false;
+                  window.__parkingZoneDetailsConfirmLogged = false;
                   bridge({ type: 'log', message: 'address search path — cleared zone cache' });
                 }
               }
@@ -4147,11 +4171,16 @@ enum BookingFormPrefill {
                 return { status: 'waiting', filled: 0, action: 'awaitZones' };
               }
               if (activateNearestZone(candidate)) {
+                // GPS nearest: pause on zone-details for manual Park here. Address slug search:
+                // user already chose the place — auto-continue Park here after settle.
+                window.__parkingZoneDetailsNeedConfirm = !addressSearch;
+                window.__parkingZoneDetailsConfirmLogged = false;
                 bridge({
                   type: 'log',
                   message: 'pickZone #' + (candidate.signageCode || candidate.zoneID)
                     + ' internal=' + (candidate.internalZoneCode || '')
                     + (candidate.distanceMeters != null ? (' dist=' + Math.round(candidate.distanceMeters) + 'm') : '')
+                    + (addressSearch ? ' via=address' : ' via=geo needConfirm=1')
                 });
                 return { status: 'advanced', filled: 0, action: 'pickZone' };
               }

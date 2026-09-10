@@ -47,8 +47,16 @@ JSON may nest under `data`. Prefer uuid-looking string ids for receipt keys (not
 ## Race: guest “An error occurred”
 
 Cause: **Park here** on zone-details before pricing/session ready.  
-Mitigation: wait first-hour pricing or ~2.8s; then overlay dismiss / **Try again**; recover via cached `areaNo` if stuck on `/v2/parking` or `zones/map`.  
-LAN: `v2 zone-details waiting settle`, `v2 Try again tapped`, `v2 error overlay closed`, `v2 recover zone-details`.
+Mitigation: wait first-hour pricing or ~2.8s before **auto** Park here (address path); geo path pauses for manual **Park here** (`awaitManualZoneConfirm`); then overlay dismiss / **Try again**; recover via cached `areaNo` if stuck on `/v2/parking` or `zones/map`.  
+LAN: `v2 zone-details waiting settle`, `awaitManualZoneConfirm`, `v2 Try again tapped`, `v2 error overlay closed`, `v2 recover zone-details`.
+
+## Geo vs address on zone-details
+
+| Source | zone-details **Park here** |
+|--------|----------------------------|
+| GPS nearest (`/search` + geo, ≤~2.5 km) | **Manual** — `awaitManualZoneConfirm` |
+| Address slug (`/search/{place}`) | **Auto** after settle |
+| Attempted / deep link | **Auto** (flag unset) |
 
 ## Z. History split
 

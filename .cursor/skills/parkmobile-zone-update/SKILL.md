@@ -79,7 +79,8 @@ Known baseline snapshot: [reference.md](reference.md).
 | New path under `/v2/parking/…` | Extend `v2ParkingStep` + advance branch; keep legacy `/zone/…` fallback |
 | Renamed testid / chip | Update selectors; keep text fallback |
 | Duration options changed | Re-map hours/minutes chips + tariff `timebasedOptions`; only Continue when shown ≈ target |
-| Guest error flash | Settle wait on zone-details (pricing / ~2.8s); dismiss overlay / **Try again**; recover `areaNo` |
+| Guest error flash | Settle wait on zone-details (pricing / ~2.8s) before **auto** Park here; geo path uses manual confirm; dismiss overlay / **Try again**; recover `areaNo` |
+| Geo wrong zone (urban GPS) | After geo pick, pause on zone-details (`awaitManualZoneConfirm`) until user taps **Park here**; address picks auto-continue |
 | Empty Receipts after pay | Capture v2 purchase + `GET …/api/parking/{uuid}` + `/v2/parking/session/guest/{uuid}` (not only legacy `/sessions/`) |
 | Attempted polluted by pay | Ignore v2 session/purchase paths in `AttemptedZoneStore.shouldIgnore` |
 | Jump opens wrong city | Jump with **internal** `areaNo` only → `/v2/parking/zone-details?areaNo=` |
