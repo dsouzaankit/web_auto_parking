@@ -3377,9 +3377,11 @@ enum BookingFormPrefill {
           }
 
           function v2DurationNearTarget(shown, target) {
-            if (shown == null || isNaN(shown) || shown < 20) return false;
-            // Allow one tariff step of undershoot (e.g. 160 want → 140/160 ok).
-            return shown >= Math.max(20, target - 19) && shown <= target + 19;
+            if (shown == null || isNaN(shown) || shown < 1) return false;
+            // Within one tariff step below target, never above (15m step: 150 ok, 135 not).
+            var step = Number(window.__parkingV2TariffStep) || 20;
+            if (step < 1) step = 20;
+            return shown <= target && shown > target - step;
           }
 
           function parseV2DurationLabel(raw) {
@@ -3675,7 +3677,26 @@ enum BookingFormPrefill {
             return clickV2PrimaryContinue(/^(continue|next|confirm)$/i);
           }
 
+          function v2PaymentOverlayOpen() {
+            var overlay = document.querySelector(
+              '[data-testid=\"session-summary-payment-overlay\"], [data-pmtest-id=\"session-summary-payment-overlay\"]'
+            );
+            return !!(overlay && visible(overlay));
+          }
+
           function v2ConfirmApplePaySelected() {
+            // Row can read \"Apple Pay\" while the method sheet is still open and unconfirmed.
+            if (v2PaymentOverlayOpen()) return false;
+            if (!v2ConfirmApplePayLabelShown()) return false;
+            if (window.__parkingV2ApplePayPicked) return true;
+            var cta = document.querySelector(
+              '[data-testid=\"confirm-pay-button\"], [data-pmtest-id=\"confirm-pay-button\"]'
+            );
+            if (cta && visible(cta) && (cta.disabled || cta.getAttribute('aria-disabled') === 'true')) return false;
+            return true;
+          }
+
+          function v2ConfirmApplePayLabelShown() {
             var payBtn = document.querySelector(
               '[data-testid=\"session-summary-payment-button\"], [data-pmtest-id=\"session-summary-payment-button\"]'
             );
@@ -3699,8 +3720,9 @@ enum BookingFormPrefill {
             // data-testid=apple-pay-button is the pay CTA on confirm — never auto-tap.
             if (tid.indexOf('apple-pay-button') !== -1) return true;
             if (tid.indexOf('complete-purchase-button') !== -1) return true;
+            if (tid.indexOf('confirm-pay-button') !== -1) return true;
             var label = ((el.innerText || el.textContent || '') + ' ' + (el.getAttribute('aria-label') || '')).toLowerCase();
-            if (/complete purchase|buy with apple|pay now|confirm payment/.test(label)) return true;
+            if (/complete purchase|buy with apple|pay now|confirm payment|start parking/.test(label)) return true;
             return false;
           }
 
@@ -3725,6 +3747,36 @@ enum BookingFormPrefill {
               }
             }
 
+            if (overlayOpen && window.__parkingV2ApplePayPicked) {
+              var closeBtn = overlay.querySelector(
+                '[data-testid=\"session-summary-payment-overlay-close\"], [data-pmtest-id=\"session-summary-payment-overlay-close\"]'
+              ) || document.querySelector(
+                '[data-testid=\"session-summary-payment-overlay-close\"], [data-pmtest-id=\"session-summary-payment-overlay-close\"]'
+              );
+              if (closeBtn && visible(closeBtn) && click(closeBtn, { scroll: false })) {
+                window.__parkingApplePayAt = now;
+                bridge({ type: 'log', message: 'v2 payment overlay closed after Apple Pay pick' });
+                return true;
+              }
+            }
+
+            if (overlayOpen) {
+              var appleRow = overlay.querySelector(
+                '[data-testid=\"session-summary-payment-apple-pay\"], [data-pmtest-id=\"session-summary-payment-apple-pay\"]'
+              );
+              if (appleRow && visible(appleRow)) {
+                var appleTarget = appleRow.matches('button, [role=\"button\"], [role=\"radio\"], label')
+                  ? appleRow
+                  : (appleRow.querySelector('button, [role=\"button\"], [role=\"radio\"], label, input') || appleRow);
+                if (click(appleTarget, { scroll: false })) {
+                  window.__parkingApplePayAt = now;
+                  window.__parkingV2ApplePayPicked = true;
+                  bridge({ type: 'log', message: 'v2 Apple Pay method selected (session-summary-payment-apple-pay)' });
+                  return true;
+                }
+              }
+            }
+
             var roots = [];
             if (overlayOpen) roots.push(overlay);
             roots.push(document);
@@ -3742,6 +3794,7 @@ enum BookingFormPrefill {
                 if (/change payment|remove|add payment|cancel|close/.test(label)) continue;
                 if (!click(el, { scroll: false })) continue;
                 window.__parkingApplePayAt = now;
+                window.__parkingV2ApplePayPicked = true;
                 bridge({ type: 'log', message: 'v2 Apple Pay method selected' });
                 return true;
               }
@@ -4068,6 +4121,7 @@ enum BookingFormPrefill {
                 window.__parkingV2DurationBumps = 0;
                 window.__parkingV2FlexiblePlanAt = 0;
                 window.__parkingV2FlexiblePlanTotal = 0;
+                window.__parkingV2ApplePayPicked = false;
               }
               var targetDur = v2DurationTargetMinutes();
               var shownDur = readV2ShownDurationMinutes();

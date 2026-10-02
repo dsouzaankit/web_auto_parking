@@ -27,8 +27,10 @@ Legacy fallback (still keep): `/zone/start|auth|vehicle|duration|payment|review`
 | Guest continue | `guest-registration-continue-button` |
 | Vehicle plate | `vehicle-form-license-plate-input` |
 | Duration hours | `duration-flexible-hours-option-{0..N}` |
-| Duration minutes | `duration-flexible-minutes-option-{20,40,…}` |
-| Duration continue | `duration-continue-button` |
+| Duration minutes | `duration-flexible-minutes-option-{…}` — values follow tariff `timeStepMinutes` (15 as of Oct 2026; was 20) |
+| Duration continue | `duration-continue-button` — only when shown is within one step **below** target, never above |
+| Payment sheet | `session-summary-payment-button` → `session-summary-payment-overlay` → `session-summary-payment-apple-pay` → `session-summary-payment-overlay-close` |
+| Confirm start CTA | `confirm-pay-button` (“Start parking”) — **never auto-tap** |
 | Error UI | `error-overlay-title`, **Try again**, `error-overlay-close-button` |
 | Confirm pay CTA | `apple-pay-button` — **select method only; never auto-tap** |
 
