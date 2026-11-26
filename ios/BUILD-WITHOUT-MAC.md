@@ -27,14 +27,13 @@ App icon: same packaging as Loop Segments — single `AppIcon.appiconset/AppIcon
 
 Full SideStore setup + troubleshooting (iloader, LocalDevVPN, pairing, free 3-app slots, sign-in 503): shared [env_setup/sidestore/README.md](../../env_setup/sidestore/README.md). Official: [docs.sidestore.io](https://docs.sidestore.io/docs/installation/prerequisites).
 
-**Confirmed:** SideStore **stable** and AltStore both hit **incorrect data format** here; **SideStore nightly** worked. Prefer nightly. Delete **AltStore** if you switch (free ID = max **3** apps — SideStore + Parking + Loop Segments fills the quota).
+Prefer **nightly** (stable and AltStore hit *incorrect data format* here). SideStore + Parking + Loop Segments fills the free ID's **3** app slots, so delete AltStore if you switch.
 
 1. Wait until Files shows the **full size** IPA (no iCloud stub).
 2. **LocalDevVPN → Connect**.
 3. **SideStore → My Apps → +** → pick the timestamped IPA (or Files → Share → SideStore).
 4. **Settings → General → VPN & Device Management** → Trust your Apple ID (first install).
-5. **Refresh / expired cert — no PC:** LocalDevVPN on → tap **7 DAYS** / Refresh in SideStore (works after “Unable to Verify App”). PC only to re-place the pairing file (iloader) after iOS update/reset.
-6. **Optional Shortcuts auto-refresh:** Shortcuts → SideStore **Refresh All Apps** → Automation (Time of Day / charging, **Run Immediately**). Same caveats as Loop Segments: Wi‑Fi + LocalDevVPN required; not 100% reliable; locked phone often fails; Trust still manual; **Always Allow** on first run; still verify weekly. Full steps: [SideStore Shortcuts auto-refresh](../../env_setup/sidestore/README.md#sidestore-shortcuts-auto-refresh-optional).
+5. **Refresh:** LocalDevVPN on → **7 DAYS** / Refresh in SideStore, no PC (optional [Shortcuts auto-refresh](../../env_setup/sidestore/README.md#sidestore-shortcuts-auto-refresh-optional)).
 
 ## Install (AltStore)
 
@@ -44,7 +43,7 @@ Full SideStore setup + troubleshooting (iloader, LocalDevVPN, pairing, free 3-ap
 4. **Settings → General → VPN & Device Management** → Trust your Apple ID (first install).
 5. Free Apple ID cert lasts ~7 days — **Refresh** in AltStore before expiry (no new IPA; retry if that flakes — same error string, different cause).
 
-Full AltStore / Wi‑Fi / Sideloadly troubleshooting: Loop Segments [BUILD-WITHOUT-MAC.md](../../ios_3d_loop_segments/ios/BUILD-WITHOUT-MAC.md).
+Full AltStore / AltServer / Wi‑Fi troubleshooting: shared [env_setup/altserver_refresh/ALTSTORE.md](../../env_setup/altserver_refresh/ALTSTORE.md). Sideloadly: Loop Segments [BUILD-WITHOUT-MAC.md](../../ios_3d_loop_segments/ios/BUILD-WITHOUT-MAC.md#5-sideloadly-last-resort).
 
 ## Local Mac (optional)
 
